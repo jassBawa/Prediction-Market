@@ -11,3 +11,6 @@ Cargo.lock
 **/*.rs.bk
 
 .env
+
+# for testing
+solana-prediction-market-program/
