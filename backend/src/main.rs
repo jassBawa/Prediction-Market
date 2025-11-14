@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::{Router, routing::get};
 use db::{DbPool, get_db_pool};
+use privy_rs::PrivyClient;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
@@ -16,6 +17,13 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let db = get_db_pool().await?;
+
+    let app_id = std::env::var("PRIVY_APP_ID").expect("PRIVY_APP_ID environment variable not set");
+    let app_secret =
+        std::env::var("PRIVY_APP_SECRET").expect("PRIVY_APP_SECRET environment variable not set");
+
+    let client = PrivyClient::new_from_env()?;
+
     let state = AppState { db };
 
     let api_routes = Router::new().route("/markets", get(routes::market::list_markets_handler));
