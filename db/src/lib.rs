@@ -15,18 +15,12 @@ pub async fn init_pool(db_url: &str) -> Result<DbPool> {
 
 /// Get a database pool from the DATABASE_URL environment variable
 pub async fn get_db_pool() -> Result<DbPool> {
-    let db_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     init_pool(&db_url).await
 }
 
 pub use models::{Market, MarketRow};
 pub use queries::market::{
-    create_market,
-    get_market_by_address,
-    get_market_by_id,
-    list_markets,
-    list_resolved_markets,
-    list_active_markets,
-    update_market_resolution,
+    create_market, get_market_by_address, get_market_by_id, list_active_markets, list_markets,
+    list_resolved_markets, update_market_resolution,
 };

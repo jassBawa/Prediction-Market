@@ -8,6 +8,7 @@ sqlx = { workspace = true }
 tokio = { workspace = true }
 db = { path = "../db" }
 anyhow = { workspace = true }
+dotenvy = {workspace = true}
 
 solana-sdk = "3.0.0"
 solana-client = "3.0.10"
