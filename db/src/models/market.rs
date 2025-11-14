@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::prelude::FromRow;
 
 #[derive(Debug, FromRow)]
@@ -25,7 +26,7 @@ pub struct MarketRow {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Market {
     pub id: i64,
     pub market_address: String,

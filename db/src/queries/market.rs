@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 use crate::models::{Market, MarketRow};
 
@@ -16,7 +16,7 @@ pub async fn create_market(
     end_timestamp: i64,
     created_slot: i64,
 ) -> Result<i64> {
-    let row = sqlx::query!(
+    let row = sqlx::query(
         r#"
         INSERT INTO markets (
             market_address,
@@ -33,21 +33,21 @@ pub async fn create_market(
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         RETURNING id
         "#,
-        market_address,
-        creator_address,
-        program_id,
-        title,
-        description,
-        category,
-        yes_option,
-        no_option,
-        end_timestamp,
-        created_slot
     )
+    .bind(market_address)
+    .bind(creator_address)
+    .bind(program_id)
+    .bind(title)
+    .bind(description)
+    .bind(category)
+    .bind(yes_option)
+    .bind(no_option)
+    .bind(end_timestamp)
+    .bind(created_slot)
     .fetch_one(pool)
     .await?;
 
-    Ok(row.id)
+    Ok(row.get::<i64, _>("id"))
 }
 
 pub async fn get_market_by_address(pool: &PgPool, address: &str) -> Result<Option<Market>> {
@@ -145,7 +145,7 @@ pub async fn update_market_resolution(
     market_address: &str,
     resolved_outcome: bool,
 ) -> Result<()> {
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE markets
         SET resolved = TRUE,
@@ -153,9 +153,9 @@ pub async fn update_market_resolution(
             updated_at = NOW()
         WHERE market_address = $1
         "#,
-        market_address,
-        resolved_outcome
     )
+    .bind(market_address)
+    .bind(resolved_outcome)
     .execute(pool)
     .await?;
 
