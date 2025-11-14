@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "db",
+    "api", "event-listener",
+]
+
+resolver = "3"
+
+[workspace.dependencies]
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono", "migrate"] }
+tokio = { version = "1", features = ["full"] }
+dotenvy = "0.15.7"
+anyhow = "1.0.100"
+serde = { version = "1.0.228", features = ["derive"] }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
