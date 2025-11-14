@@ -1,16 +1,13 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use serde::Deserialize;
 
 use crate::AppState;
 use db::{
-    list_active_markets,
-    list_markets,
-    list_resolved_markets,
-    models::Market,
+    get_market_by_address, list_active_markets, list_markets, list_resolved_markets, models::Market,
 };
 
 #[derive(Debug, Deserialize, Default)]
@@ -34,6 +31,17 @@ pub async fn list_markets_handler(
     };
 
     markets_result
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+// GET /markets/:address
+pub async fn get_market_handler(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Result<Json<Option<Market>>, StatusCode> {
+    get_market_by_address(&state.db, &address)
+        .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

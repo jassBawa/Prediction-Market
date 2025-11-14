@@ -12,3 +12,4 @@ dotenvy = { workspace = true }
 serde = { workspace = true }
 axum = "0.8.6"
 privy-rs = "0.1.0-alpha.4"
+jsonwebtoken = {version = "10.2.0", features = ["rust_crypto"]}
