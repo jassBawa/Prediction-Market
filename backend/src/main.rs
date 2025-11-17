@@ -1,37 +1,27 @@
-use anyhow::Result;
-use axum::{Router, routing::get};
-use db::{DbPool, get_db_pool};
-use privy_rs::PrivyClient;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 
-mod auth;
-mod routes;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: DbPool,
-}
+// Import all modules from lib
+use backend::{config, routes, state};
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+async fn main() {
+    let config = config::Config::from_env();
 
-    let db = get_db_pool().await?;
+    let db_pool = db::init_pool(&config.database_url)
+        .await
+        .expect("Failed to create database pool");
 
-    // let app_id = std::env::var("PRIVY_APP_ID").expect("PRIVY_APP_ID environment variable not set");
-    // let app_secret =
-    //     std::env::var("PRIVY_APP_SECRET").expect("PRIVY_APP_SECRET environment variable not set");
+    let app_state = state::AppState {
+        markets: Arc::new(RwLock::new(HashMap::new())),
+        db: db_pool,
+    };
 
-    let state = AppState { db };
+    let app = routes::create_router(app_state);
 
-    let api = routes::create_router(state);
+    let listener = tokio::net::TcpListener::bind(&config.server_addr)
+        .await
+        .expect("Failed to bind to address");
 
-    let app = Router::new().nest("/api/v1", api);
-
-    let addr: SocketAddr = "0.0.0.0:3000".parse()?;
-    let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    axum::serve(listener, app).await.expect("Server error");
 }
