@@ -1,0 +1,17 @@
+[package]
+name = "matching-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["Prediction Market Team"]
+description = "High-performance order matching engine for prediction markets"
+license = "MIT"
+
+[dependencies]
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
