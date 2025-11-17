@@ -13,4 +13,4 @@ Cargo.lock
 .env
 
 # for testing
-solana-prediction-market-program/
+solana-prediction-market-program
