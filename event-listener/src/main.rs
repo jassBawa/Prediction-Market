@@ -27,14 +27,15 @@ pub struct MarketInitialized {
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL")?;
+    let program_id = std::env::var("PROGRAM_Id")?;
     let pool = init_pool(&database_url).await?;
 
     // subscribe
     let ws_client = PubsubClient::new("ws://localhost:8900").await?;
 
     let config = RpcTransactionLogsConfig { commitment: None };
-    let program_id = Pubkey::from_str("8TzgHbENzybwKDterDa57kzPM6RfjLWQdQCqYPW9mZ3X")
-        .map_err(|e| anyhow::anyhow!("Invalid program id: {}", e))?;
+    let program_id =
+        Pubkey::from_str(&program_id).map_err(|e| anyhow::anyhow!("Invalid program id: {}", e))?;
 
     let filter = RpcTransactionLogsFilter::Mentions(vec![program_id.to_string()]);
     let (mut log_stream, _sub) = ws_client.logs_subscribe(filter, config).await?;
@@ -77,7 +78,10 @@ async fn main() -> Result<()> {
                                         println!("Market inserted into DB with id {}", id);
                                     }
                                     Err(e) => {
-                                        eprintln!("Error inserting market {}: {}", market_address, e);
+                                        eprintln!(
+                                            "Error inserting market {}: {}",
+                                            market_address, e
+                                        );
                                     }
                                 }
                             }
