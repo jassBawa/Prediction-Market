@@ -1,22 +1,22 @@
+use std::sync::Arc;
+
 use axum::{
-    Router, middleware,
     routing::{get, post},
+    Router,
 };
 
-use crate::{AppState, auth::middelware::auth_middleware};
+use crate::state::AppState;
 
 pub mod market;
 pub mod orders;
 
 pub fn create_router(state: AppState) -> Router {
-    let public_routes = Router::new()
+    Router::new()
         .route("/markets", get(market::list_markets_handler))
-        .route("/markets/{address}", get(market::get_market_handler));
-
-    let protected_routes = Router::new()
-        .route("/orders/open", post(orders::open_order_handler))
-        .route("/orders/close", post(orders::close_order_handler))
-        .layer(middleware::from_fn(auth_middleware));
-
-    public_routes.merge(protected_routes).with_state(state)
+        .route("/markets/{address}", get(market::get_market_handler))
+        .route("/orders/open", post(orders::place_order))
+        .route("/orders/close", post(orders::cancel_order))
+        .route("/orderbook/{market_id}", get(orders::get_orderbook))
+        // .layer(middleware::from_fn(auth_middleware))
+        .with_state(Arc::new(state))
 }
