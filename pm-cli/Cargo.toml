@@ -1,0 +1,16 @@
+[package]
+name = "pm-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anchor-client = {workspace = true}
+anchor-lang = {workspace = true}
+anyhow = {workspace = true}
+shellexpand = "3.1.1"
+clap = {version = "4.5.52", features = ["derive"]}
+anchor-spl = {workspace = true}
+spl-token = {workspace = true}
+solana-client = {workspace = true}
+solana-sdk = {workspace = true}
+tokio = {workspace = true}
