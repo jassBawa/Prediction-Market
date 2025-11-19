@@ -26,6 +26,13 @@ enum Commands {
         #[arg(long)]
         end_time: i64,
     },
+    ResolveMarket {
+        #[arg(long)]
+        market_id: u64,
+
+        #[arg(long)]
+        outcome: String
+    }
 }
 
 #[tokio::main]
@@ -43,6 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             end_time,
         } => {
             commands::create_market(program, payer, market_id, metadata, end_time).await?;
+        }
+        Commands::ResolveMarket { market_id, outcome} => {
+            commands::resolve_market(program, payer, market_id, outcome).await?;
         }
     }
 
