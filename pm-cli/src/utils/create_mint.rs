@@ -1,7 +1,6 @@
-use std::rc::Rc;
-
 use anyhow::Result;
 use solana_client::nonblocking::rpc_client::RpcClient;
+#[allow(deprecated)]
 use solana_sdk::{
     program_pack::Pack,
     pubkey::Pubkey,
@@ -10,6 +9,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use spl_token::{instruction::initialize_mint2, state::Mint};
+use std::rc::Rc;
 
 pub async fn create_mint(
     client: &RpcClient,

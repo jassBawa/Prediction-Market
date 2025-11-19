@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use anchor_client::solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
@@ -25,8 +26,10 @@ pub async fn create_market(
     let collateral_mint = create_mint(&rpc_client, &payer_keypair, payer_keypair.pubkey()).await?;
     println!("Collateral mint created: {}", collateral_mint);
 
-    let (market_pda, _market_bump) =
-        Pubkey::find_program_address(&[b"market", &market_id.to_le_bytes()], &predix_program::id());
+    let (market_pda, _market_bump) = Pubkey::find_program_address(
+        &[b"market", &market_id.to_le_bytes()],
+        &predix_program::id(),
+    );
 
     let (vault_pda, _vault_bump) = Pubkey::find_program_address(
         &[b"collateral_vault", &market_id.to_le_bytes()],
@@ -38,8 +41,10 @@ pub async fn create_market(
         &predix_program::id(),
     );
 
-    let (no_mint_pda, _no_bump) =
-        Pubkey::find_program_address(&[b"no_mint", &market_id.to_le_bytes()], &predix_program::id());
+    let (no_mint_pda, _no_bump) = Pubkey::find_program_address(
+        &[b"no_mint", &market_id.to_le_bytes()],
+        &predix_program::id(),
+    );
 
     println!("Market PDA: {}", market_pda);
     println!("Vault PDA: {}", vault_pda);
