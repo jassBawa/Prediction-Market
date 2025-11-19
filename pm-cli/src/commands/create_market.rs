@@ -3,12 +3,9 @@ use anchor_client::solana_sdk::{
     signature::{Keypair, Signer},
     system_program,
 };
-use anchor_lang::declare_program;
 use anyhow::Result;
-use predix_program::{client::accounts, client::args};
 use std::rc::Rc;
 
-declare_program!(predix_program);
 use crate::utils::create_mint::create_mint;
 
 pub async fn create_market(
@@ -29,20 +26,20 @@ pub async fn create_market(
     println!("Collateral mint created: {}", collateral_mint);
 
     let (market_pda, _market_bump) =
-        Pubkey::find_program_address(&[b"market", &market_id.to_le_bytes()], &predix_program::ID);
+        Pubkey::find_program_address(&[b"market", &market_id.to_le_bytes()], &predix_program::id());
 
     let (vault_pda, _vault_bump) = Pubkey::find_program_address(
         &[b"collateral_vault", &market_id.to_le_bytes()],
-        &predix_program::ID,
+        &predix_program::id(),
     );
 
     let (yes_mint_pda, _yes_bump) = Pubkey::find_program_address(
         &[b"yes_mint", &market_id.to_le_bytes()],
-        &predix_program::ID,
+        &predix_program::id(),
     );
 
     let (no_mint_pda, _no_bump) =
-        Pubkey::find_program_address(&[b"no_mint", &market_id.to_le_bytes()], &predix_program::ID);
+        Pubkey::find_program_address(&[b"no_mint", &market_id.to_le_bytes()], &predix_program::id());
 
     println!("Market PDA: {}", market_pda);
     println!("Vault PDA: {}", vault_pda);
@@ -52,7 +49,7 @@ pub async fn create_market(
 
     let initialize_tx = program
         .request()
-        .accounts(accounts::InitializeMarket {
+        .accounts(predix_program::accounts::InitializeMarket {
             market: market_pda,
             vault: vault_pda,
             collateral_mint,
@@ -63,7 +60,7 @@ pub async fn create_market(
             token_program: anchor_spl::token::ID,
             associated_token_program: anchor_spl::associated_token::ID,
         })
-        .args(args::InitializeMarket {
+        .args(predix_program::instruction::InitializeMarket {
             market_id,
             metadata: metadata.clone(),
             expiration_timestamp: end_time,

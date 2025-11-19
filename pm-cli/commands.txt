@@ -1,0 +1,13 @@
+dir: /pm-cli
+
+-----create market
+cargo run -- create-market \                                                                                16:09:45
+    --market-id 1 \
+    --metadata "Will Bitcoin reach $100k by end of 2024?" \
+    --end-time $(($(date +%s) + 86400))
+
+-----list markets
+cargo run -- list-markets
+
+-----resolve market
+cargo run -- resolve-market --market-id 1 --outcome yes

@@ -14,3 +14,5 @@ spl-token = {workspace = true}
 solana-client = {workspace = true}
 solana-sdk = {workspace = true}
 tokio = {workspace = true}
+predix-program = { path = "../solana-prediction-market-program/programs/predix-program", features = ["cpi"] }
+serde_json = {workspace = true}
