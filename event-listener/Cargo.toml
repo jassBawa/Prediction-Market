@@ -4,18 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+db = { path = "../db" }
 sqlx = { workspace = true }
 tokio = { workspace = true }
-db = { path = "../db" }
 anyhow = { workspace = true }
 dotenvy = {workspace = true}
+solana-client = {workspace = true}
 
-solana-sdk = "3.0.0"
-solana-client = "3.0.10"
+solana-sdk = {workspace = true}
 solana-commitment-config = "3.1.0"
 tokio-stream = "0.1.17"
 solana-account-decoder = "3.0.10"
-anchor-lang = "0.32.1"
+anchor-lang = {workspace = true}
 
 solana-program = "3.0.0"
 base64 = "0.22.1"

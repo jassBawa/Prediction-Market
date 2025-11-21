@@ -27,7 +27,7 @@ pub struct MarketInitialized {
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL")?;
-    let program_id = std::env::var("PROGRAM_Id")?;
+    let program_id = std::env::var("PROGRAM_ID")?;
     let pool = init_pool(&database_url).await?;
 
     // subscribe
@@ -53,6 +53,7 @@ async fn main() -> Result<()> {
                             Ok(event) => {
                                 println!("EVENT: {:?}", event);
                                 let market_address = event.market.to_string();
+                                let market_id = event.market_id.to_string();
                                 let creator_address = event.authority.to_string();
                                 let program_id_str = program_id.to_string();
                                 let title = event.metadata.clone();
@@ -61,6 +62,7 @@ async fn main() -> Result<()> {
 
                                 match create_market(
                                     &pool,
+                                    &market_id,
                                     &market_address,
                                     &creator_address,
                                     &program_id_str,
