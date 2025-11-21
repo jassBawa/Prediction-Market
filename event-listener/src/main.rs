@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use anyhow::Result;
-use db::{create_market, init_pool};
+use db::{create_market, init_pool, update_market_resolution};
 
+use base64;
 use solana_client::{
     nonblocking::pubsub_client::PubsubClient,
     rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
@@ -23,6 +24,13 @@ pub struct MarketInitialized {
     pub expiration_timestamp: i64,
 }
 
+#[derive(Debug, AnchorDeserialize)]
+pub struct MarketSettled {
+    pub market: Pubkey,
+    pub market_id: u64,
+    pub outcome: u8, // 0 => yes, 1 => no, 2 = Undecided
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
@@ -40,14 +48,18 @@ async fn main() -> Result<()> {
     let filter = RpcTransactionLogsFilter::Mentions(vec![program_id.to_string()]);
     let (mut log_stream, _sub) = ws_client.logs_subscribe(filter, config).await?;
 
-    let discriminator =
+    let initialized_discriminator =
         solana_program::hash::hashv(&[b"event:MarketInitialized"]).to_bytes()[..8].to_vec();
+    let settle_discriminator =
+        solana_program::hash::hashv(&[b"event:MarketSettled"]).to_bytes()[..8].to_vec();
 
     while let Some(msg) = log_stream.next().await {
         for log in msg.value.logs {
+            println!("{:?}", log);
             if let Some(stripped) = log.strip_prefix("Program data: ") {
                 if let Ok(data) = base64::decode(stripped) {
-                    if data.starts_with(&discriminator) {
+                    println!("{:?}", data);
+                    if data.starts_with(&initialized_discriminator) {
                         let payload = &data[8..];
                         match MarketInitialized::try_from_slice(payload) {
                             Ok(event) => {
@@ -82,6 +94,46 @@ async fn main() -> Result<()> {
                                     Err(e) => {
                                         eprintln!(
                                             "Error inserting market {}: {}",
+                                            market_address, e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to parse event: {:?}", e),
+                        }
+                    } else if data.starts_with(&settle_discriminator) {
+                        let payload = &data[8..];
+                        match MarketSettled::try_from_slice(payload) {
+                            Ok(event) => {
+                                println!("EVENT: {:?}", event);
+                                let market_address = event.market.to_string();
+
+                                let resolved_outcome = match event.outcome {
+                                    0 => Some("Yes".to_string()),
+                                    1 => Some("No".to_string()),
+                                    _ => {
+                                        eprintln!("WARNING: Market {} settled with Undecided outcome (2). This shouldn't happen!",
+                                               market_address);
+                                        None
+                                    }
+                                };
+
+                                match update_market_resolution(
+                                    &pool,
+                                    &market_address,
+                                    &resolved_outcome.clone().unwrap_or_else(|| "No".to_string()),
+                                )
+                                .await
+                                {
+                                    Ok(_) => {
+                                        println!(
+                                            "Market {} settled in DB with outcome: {:?}",
+                                            market_address, resolved_outcome
+                                        );
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Error updating market settlement {}: {}",
                                             market_address, e
                                         );
                                     }
