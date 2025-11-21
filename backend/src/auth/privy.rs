@@ -1,25 +1,45 @@
-use anyhow::{Context, Result};
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+use std::env;
 
-use crate::auth::claims::PrivyClaims;
+use anyhow::{Context, Result};
+use privy_rs::{
+    generated::{types::WalletRpcResponse, ResponseValue},
+    AuthorizationContext, PrivateKey, PrivyClient,
+};
 
 const PRIVY_ISSUER: &str = "privy.io";
 
-pub async fn validate_privy_jwt(token: &str) -> Result<PrivyClaims> {
-    let verification_key = std::env::var("PRIVY_VERIFICATION_KEY")
-        .context("PRIVY_VERIFICATION_KEY environment variable not set")?;
-    let app_id =
-        std::env::var("PRIVY_APP_ID").context("PRIVY_APP_ID environment variable not set")?;
+pub struct PClient {
+    pub client: PrivyClient,
+}
+impl PClient {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let app_id =
+            std::env::var("PRIVY_APP_ID").context("PRIVY_APP_ID environment variable not set")?;
 
-    let mut validation = Validation::new(Algorithm::ES256);
-    validation.set_issuer(&[PRIVY_ISSUER]);
-    validation.set_audience(&[app_id]);
+        let app_secret = env::var("PRIVY_APP_SECRET")
+            .context("PRIVY_APP_SECRET environment variable not set")?;
 
-    let decoding_key = DecodingKey::from_ec_pem(verification_key.as_bytes())
-        .context("failed to parse PRIVY_VERIFICATION_KEY as PEM")?;
+        let client = PrivyClient::new(app_id, app_secret)?;
 
-    let token_data = decode::<PrivyClaims>(token, &decoding_key, &validation)
-        .context("failed to decode privy token")?;
+        Ok(Self { client })
+    }
 
-    Ok(token_data.claims)
+    pub async fn sign_message(
+        &self,
+        wallet_address: &str,
+        message: &str,
+    ) -> Result<ResponseValue<WalletRpcResponse>, Box<dyn std::error::Error>> {
+        let auth_key =
+            env::var("PRIVY_SIGNER_PRIVATE_KEY").expect("PRIVY_AUTH_KEY environment not set");
+        let ctx = AuthorizationContext::new().push(PrivateKey(auth_key.to_string()));
+
+        let res = self
+            .client
+            .wallets()
+            .solana()
+            .sign_message(wallet_address, message, &ctx, None)
+            .await?;
+
+        Ok((res))
+    }
 }
