@@ -5,6 +5,7 @@ use crate::models::{Market, MarketRow};
 
 pub async fn create_market(
     pool: &PgPool,
+    market_id: &str,
     market_address: &str,
     creator_address: &str,
     program_id: &str,
@@ -19,6 +20,7 @@ pub async fn create_market(
     let row = sqlx::query(
         r#"
         INSERT INTO markets (
+            market_id,
             market_address,
             creator_address,
             program_id,
@@ -30,10 +32,11 @@ pub async fn create_market(
             end_timestamp,
             created_slot
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11)
         RETURNING id
         "#,
     )
+    .bind(market_id)
     .bind(market_address)
     .bind(creator_address)
     .bind(program_id)
@@ -55,6 +58,7 @@ pub async fn get_market_by_address(pool: &PgPool, address: &str) -> Result<Optio
         r#"
         SELECT
             id,
+            market_id,
             market_address,
             creator_address,
             program_id,
@@ -81,6 +85,7 @@ pub async fn get_market_by_address(pool: &PgPool, address: &str) -> Result<Optio
     Ok(row.map(|r| r.into()))
 }
 
+// for database
 pub async fn get_market_by_id(pool: &PgPool, id: i64) -> Result<Option<Market>> {
     let row = sqlx::query_as::<_, MarketRow>(
         r#"
@@ -93,6 +98,19 @@ pub async fn get_market_by_id(pool: &PgPool, id: i64) -> Result<Option<Market>> 
     .await?;
 
     Ok(row.map(|r| r.into()))
+}
+
+pub async fn get_next_market_by_id(pool: &PgPool) -> Result<u64> {
+    let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(market_id) FROM markets")
+        .fetch_optional(pool)
+        .await?;
+
+    let next_id = match row {
+        Some((Some(max_id),)) => max_id + 1,
+        _ => 1,
+    };
+
+    Ok(next_id as u64)
 }
 
 pub async fn list_markets(pool: &PgPool, limit: i64, offset: i64) -> Result<Vec<Market>> {

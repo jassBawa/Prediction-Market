@@ -5,6 +5,7 @@ use sqlx::prelude::FromRow;
 #[derive(Debug, FromRow)]
 pub struct MarketRow {
     pub id: i64,
+    pub market_id: i64,
     pub market_address: String,
     pub creator_address: String,
     pub program_id: String,
@@ -29,6 +30,7 @@ pub struct MarketRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct Market {
     pub id: i64,
+    pub market_id: i64,
     pub market_address: String,
     pub creator_address: String,
     pub program_id: String,
@@ -54,6 +56,7 @@ impl From<MarketRow> for Market {
     fn from(row: MarketRow) -> Self {
         Self {
             id: row.id,
+            market_id: row.market_id,
             market_address: row.market_address,
             creator_address: row.creator_address,
             program_id: row.program_id,

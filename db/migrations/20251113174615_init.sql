@@ -3,6 +3,7 @@ CREATE TABLE markets (
     id BIGSERIAL PRIMARY KEY,
 
     market_address TEXT NOT NULL UNIQUE,
+    market_id TEXT NOT NULL UNIQUE,
     creator_address TEXT NOT NULL,
     program_id TEXT NOT NULL,
 
