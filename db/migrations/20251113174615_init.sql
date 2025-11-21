@@ -18,10 +18,13 @@ CREATE TABLE markets (
     end_timestamp BIGINT NOT NULL,
     created_slot BIGINT NOT NULL,
     resolved BOOLEAN NOT NULL DEFAULT FALSE,
-    resolved_outcome BOOLEAN,
+    resolved_outcome TEXT ,
 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT check_resolved_outcome
+          CHECK (resolved_outcome IS NULL OR resolved_outcome IN ('Yes', 'No'))
 );
 
 -- Useful indexes

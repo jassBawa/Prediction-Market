@@ -161,7 +161,7 @@ pub async fn list_active_markets(pool: &PgPool) -> Result<Vec<Market>> {
 pub async fn update_market_resolution(
     pool: &PgPool,
     market_address: &str,
-    resolved_outcome: bool,
+    resolved_outcome: &str,
 ) -> Result<()> {
     sqlx::query(
         r#"

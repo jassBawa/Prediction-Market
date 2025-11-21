@@ -21,7 +21,7 @@ pub struct MarketRow {
     pub created_slot: i64,
 
     pub resolved: bool,
-    pub resolved_outcome: Option<bool>,
+    pub resolved_outcome: Option<String>,
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -46,7 +46,7 @@ pub struct Market {
     pub created_slot: i64,
 
     pub resolved: bool,
-    pub resolved_outcome: Option<bool>,
+    pub resolved_outcome: Option<String>,
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
