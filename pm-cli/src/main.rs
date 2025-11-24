@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Args::parse();
     let keypair_path = shellexpand::tilde("~/.config/solana/id.json").to_string();
     let payer = read_keypair_file(keypair_path)?;
-    let client = Client::new(Cluster::Localnet, Rc::new(payer.insecure_clone()));
+    let client = Client::new(Cluster::Devnet, Rc::new(payer.insecure_clone()));
     let program = client.program(predix_program::ID).unwrap();
 
     match cli.command {

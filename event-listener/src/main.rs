@@ -28,7 +28,7 @@ pub struct MarketInitialized {
 pub struct MarketSettled {
     pub market: Pubkey,
     pub market_id: u64,
-    pub outcome: u8, // 0 => yes, 1 => no, 2 = Undecided
+    pub outcome: u8,
 }
 
 #[tokio::main]
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     let pool = init_pool(&database_url).await?;
 
     // subscribe
-    let ws_client = PubsubClient::new("ws://localhost:8900").await?;
+    let ws_client = PubsubClient::new("wss://api.devnet.solana.com/").await?;
 
     let config = RpcTransactionLogsConfig { commitment: None };
     let program_id =

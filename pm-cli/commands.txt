@@ -1,7 +1,7 @@
 dir: /pm-cli
 
 -----create market
-cargo run -- create-market \                                                                                16:09:45
+cargo run -- create-market \
     --market-id 1 \
     --metadata "Will Bitcoin reach $100k by end of 2024?" \
     --end-time $(($(date +%s) + 86400))

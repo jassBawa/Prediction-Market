@@ -4,10 +4,9 @@ use anchor_client::solana_sdk::{
     signature::{Keypair, Signer},
     system_program,
 };
+use anchor_spl::associated_token::get_associated_token_address;
 use anyhow::Result;
 use std::rc::Rc;
-
-use crate::utils::create_mint::create_mint;
 
 pub async fn create_market(
     program: anchor_client::Program<Rc<Keypair>>,
@@ -18,23 +17,18 @@ pub async fn create_market(
 ) -> Result<()> {
     println!("Creating market with ID: {}", market_id);
 
-    // Create RPC client for create_mint function
-    let rpc_client =
-        solana_client::nonblocking::rpc_client::RpcClient::new("http://127.0.0.1:8899".to_string());
+    let collateral_mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        .parse::<Pubkey>()
+        .expect("Invalid USDC Mint");
 
-    println!("Creating collateral mint...");
-    let collateral_mint = create_mint(&rpc_client, &payer_keypair, payer_keypair.pubkey()).await?;
-    println!("Collateral mint created: {}", collateral_mint);
+    println!("Using USDC as collateral mint: {}", collateral_mint);
 
     let (market_pda, _market_bump) = Pubkey::find_program_address(
         &[b"market", &market_id.to_le_bytes()],
         &predix_program::id(),
     );
 
-    let (vault_pda, _vault_bump) = Pubkey::find_program_address(
-        &[b"collateral_vault", &market_id.to_le_bytes()],
-        &predix_program::id(),
-    );
+    let vault_pda = get_associated_token_address(&market_pda, &collateral_mint);
 
     let (yes_mint_pda, _yes_bump) = Pubkey::find_program_address(
         &[b"yes_mint", &market_id.to_le_bytes()],
