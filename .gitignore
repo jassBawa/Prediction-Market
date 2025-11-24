@@ -14,3 +14,5 @@ Cargo.lock
 
 # for testing
 solana-prediction-market-program
+
+.DS_Store

@@ -31,6 +31,7 @@ impl OrderBook {
         side: Side,
     ) -> (Uuid, Vec<Trade>, Decimal) {
         let mut trades: Vec<Trade> = Vec::new();
+        println!("placing order from engine");
 
         match side {
             Side::Bid => self.execute_bid_order(&mut order, &mut trades),

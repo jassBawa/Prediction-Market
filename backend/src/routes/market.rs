@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -7,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::state::AppState;
+use crate::state::Shared;
 use db::{
     get_market_by_address, list_active_markets, list_markets, list_resolved_markets, models::Market,
 };
@@ -20,7 +18,7 @@ pub struct MarketQuery {
 }
 
 pub async fn list_markets_handler(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Shared>,
     Query(params): Query<MarketQuery>,
 ) -> Result<Json<Vec<Market>>, StatusCode> {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
@@ -38,7 +36,7 @@ pub async fn list_markets_handler(
 }
 
 pub async fn get_market_handler(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Shared>,
     Path(address): Path<String>,
 ) -> Result<Json<Option<Market>>, StatusCode> {
     get_market_by_address(&state.db, &address)

@@ -1,118 +1,132 @@
-use std::env;
-
 use axum::{
     body::Body,
     http::{HeaderMap, Request, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
+    Json,
 };
 use jsonwebtoken::{decode, DecodingKey, Validation};
+use serde_json::json;
 
-use crate::auth::claims::{AuthUser, PrivyClaims, RawClaims};
+use crate::auth::claims::{AuthUser, LinkedAccount, RawClaims};
 
-// use crate::auth::privy::validate_privy_jwt;
+fn error_response(msg: &str, code: StatusCode) -> Response {
+    (code, Json(json!({ "error": msg }))).into_response()
+}
 
-pub async fn auth_middleware(
-    headers: HeaderMap,
-    mut req: Request<Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let auth_header = req
-        .headers()
-        .get("privy-id-token")
-        .and_then(|h| h.to_str().ok());
-
+pub async fn auth_middleware(headers: HeaderMap, mut req: Request<Body>, next: Next) -> Response {
     let access_token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
 
-    let token = match auth_header {
-        Some(c) => c.to_string(),
-        None => return Err(StatusCode::UNAUTHORIZED),
+    let access_token = match access_token {
+        Some(t) => t.to_string(),
+        None => return error_response("Missing Bearer token", StatusCode::UNAUTHORIZED),
     };
 
-    let public_key =
-        env::var("PRIVY_VERIFICATION_PEM").expect("PRIVY_VERIFICAITION_PEM environment not set");
-    let app_id = env::var("PRIVY_APP_ID").expect("PRIVY_APP_ID environment not set");
+    let id_token = headers.get("privy-id-token").and_then(|v| v.to_str().ok());
+
+    let id_token = match id_token {
+        Some(v) => v.to_string(),
+        None => return error_response("Missing privy-id-token", StatusCode::UNAUTHORIZED),
+    };
+
+    let public_key = match std::env::var("PRIVY_VERIFICATION_PEM") {
+        Ok(v) => v,
+        Err(_) => {
+            return error_response(
+                "PRIVY_VERIFICATION_PEM missing",
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    };
+
+    let app_id = match std::env::var("PRIVY_APP_ID") {
+        Ok(v) => v,
+        Err(_) => return error_response("PRIVY_APP_ID missing", StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
     let mut validation = Validation::new(jsonwebtoken::Algorithm::ES256);
     validation.set_issuer(&["privy.io"]);
     validation.set_audience(&[&app_id]);
 
-    let decoding_key = DecodingKey::from_ec_pem(public_key.as_bytes()).expect("INVALID public key");
-
-    let token_data =
-        decode::<RawClaims>(token, &decoding_key, &validation).expect("Token verifction failed");
-
-    let data = PrivyClaims {
-        aud: token_data.claims.aud,
-        sub: token_data.claims.sub,
-        iss: token_data.claims.iss,
-        custom_metadata: token_data.claims.custom_metadata,
-        exp: token_data.claims.exp,
-        iat: token_data.claims.iat,
-        linked_accounts: match token_data.claims.linked_accounts {
-            Some(accounts) => serde_json::from_str(&accounts).unwrap_or_default(),
-            None => return Err(StatusCode::UNAUTHORIZED),
-        },
+    let decoding_key = match DecodingKey::from_ec_pem(public_key.as_bytes()) {
+        Ok(k) => k,
+        Err(_) => return error_response("Invalid Privy PEM key", StatusCode::UNAUTHORIZED),
     };
 
-    if data.linked_accounts.is_empty() {
-        dbg!("No linked accounts found");
-        return Err(StatusCode::UNAUTHORIZED);
+    let token_data = match decode::<RawClaims>(&id_token, &decoding_key, &validation) {
+        Ok(t) => t,
+        Err(e) => {
+            return error_response(
+                &format!("Token verification failed: {}", e),
+                StatusCode::UNAUTHORIZED,
+            )
+        }
+    };
+
+    let linked: Vec<LinkedAccount> = match token_data.claims.linked_accounts {
+        Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+        None => return error_response("No linked accounts in token", StatusCode::UNAUTHORIZED),
+    };
+
+    if linked.is_empty() {
+        return error_response("Linked accounts empty", StatusCode::UNAUTHORIZED);
     }
 
-    let name = data
-        .linked_accounts
-        .iter()
-        .find(|acc| acc.account_type == "google_oauth")
-        .and_then(|acc| acc.name.clone());
-    let email = data
-        .linked_accounts
-        .iter()
-        .find(|acc| acc.account_type == "google_oauth")
-        .and_then(|acc| acc.email.clone());
-    let solana_address = data
-        .linked_accounts
-        .iter()
-        .find(|acc| acc.account_type == "wallet" && acc.chain_type.as_deref() == Some("solana"))
-        .and_then(|acc| acc.address.clone());
-    let wallet_id = data
-        .linked_accounts
-        .iter()
-        .find(|acc| acc.account_type == "wallet" && acc.chain_type.as_deref() == Some("solana"))
-        .and_then(|acc| acc.id.clone());
+    let email = linked.iter().find_map(|a| match a.account_type.as_str() {
+        "google_oauth" => a.email.clone(),
+        "email" => a.address.clone(),
+        "email_address" => a.address.clone(),
+        _ => None,
+    });
+
+    // println!("Extracted email before match: {:?}", email);
 
     let email = match email {
-        Some(e) => e,
-        None => return Err(StatusCode::UNAUTHORIZED),
+        Some(v) => v,
+        None => return error_response("Email not found", StatusCode::UNAUTHORIZED),
     };
+    // println!("Final email string: {:?}", email);
 
-    let solana_address = match solana_address {
-        Some(e) => e,
-        None => return Err(StatusCode::UNAUTHORIZED),
+    let sol_address = linked
+        .iter()
+        .find(|a| a.account_type == "wallet" && a.chain_type.as_deref() == Some("solana"))
+        .and_then(|a| a.address.clone());
+
+    let sol_address = match sol_address {
+        Some(v) => v,
+        None => return error_response("Solana wallet not found", StatusCode::UNAUTHORIZED),
     };
+    // println!("soladdress: {:?}", sol_address);
+
+    let wallet_id = linked
+        .iter()
+        .find(|a| a.account_type == "wallet" && a.chain_type.as_deref() == Some("solana"))
+        .and_then(|a| a.address.clone());
+    // println!(" wallet_id {:?}", wallet_id);
 
     let wallet_id = match wallet_id {
-        Some(e) => e,
-        None => return Err(StatusCode::UNAUTHORIZED),
+        Some(v) => v,
+        None => return error_response("Solana wallet ID not found", StatusCode::UNAUTHORIZED),
     };
+    // println!("walletid: {:?}", wallet_id);
 
-    let access_token = match access_token {
-        Some(e) => e.to_string(),
-        None => return Err(StatusCode::UNAUTHORIZED),
-    };
+    let name = linked
+        .iter()
+        .find(|acc| acc.account_type == "google_oauth")
+        .and_then(|acc| acc.name.clone())
+        .unwrap_or_default();
 
-    let name = name.unwrap_or_default();
-
-    let auth_user = AuthUser {
+    // println!("name: {:?}", name);
+    req.extensions_mut().insert(AuthUser {
         access_token,
         wallet_id,
         email,
         name,
-        solana_address,
-    };
-    req.extensions_mut().insert(auth_user);
+        solana_address: sol_address,
+    });
 
-    Ok(next.run(req).await)
+    next.run(req).await
 }

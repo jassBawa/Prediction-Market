@@ -3,22 +3,25 @@ use std::str::FromStr;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use db::get_market_by_address;
 use rust_decimal::Decimal;
-use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::{
-    models::order::{CancelReq, CancelRes, PlaceOrderReq, PlaceOrderRes},
+    auth::claims::AuthUser,
+    models::order::{
+        CancelReq, CancelRes, OrderBookResponse, OrderBookSide, PlaceOrderReq, PlaceOrderRes,
+    },
     state::Shared,
 };
-use matching_engine::{run_market_engine, EngineMsg, OrderEntry, SnapshotData};
+use matching_engine::{run_market_engine, EngineMsg, OrderEntry};
 
 pub async fn place_order(
     State(state): State<Shared>,
+    Extension(user): Extension<AuthUser>,
     Json(req): Json<PlaceOrderReq>,
 ) -> Result<Json<PlaceOrderRes>, (StatusCode, String)> {
     let price =
@@ -26,23 +29,71 @@ pub async fn place_order(
     let qty =
         Decimal::from_str(&req.qty).map_err(|_| (StatusCode::BAD_REQUEST, "bad qty".into()))?;
 
+    println!("request body --> {:?}", req);
+
+    let delegation_verified = crate::solana::verify_delegation(
+        &state.rpc,
+        &req.market_address,
+        &user.solana_address,
+        req.side,
+        req.share,
+        price,
+        qty,
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("Delegation verification error: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to verify delegation: {}", e),
+        )
+    })?;
+
+    if !delegation_verified {
+        let (tx_message, recent_blockhash) = crate::solana::generate_approval_transaction(
+            &state.rpc,
+            &req.market_address,
+            &user.solana_address,
+            req.side,
+            req.share,
+            price,
+            qty,
+        )
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to generate approval transaction: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to generate approval transaction: {}", e),
+            )
+        })?;
+
+        return Ok(Json(PlaceOrderRes::DelegationRequired {
+            tx_message,
+            recent_blockhash,
+        }));
+    }
+
     let order_id = Uuid::new_v4();
     let order = OrderEntry {
         id: order_id,
-        user_id: req.user_id.clone(),
+        user_id: user.solana_address.clone(),
         market_id: req.market_id.clone(),
         price,
         qty,
     };
 
+    println!(
+        "Order received: {:?} {} {} for market {}",
+        req.side, qty, price, req.market_id
+    );
     let markets = state.markets.read().await;
-    // retrieve market
     let tx = if let Some(tx) = markets.get(&req.market_id) {
         tx.clone()
     } else {
-        // drop(markets);
+        drop(markets);
 
-        let _market = get_market_by_address(&state.db, &req.market_id)
+        let _market = get_market_by_address(&state.db, &req.market_address)
             .await
             .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error".into()))?
             .ok_or((StatusCode::NOT_FOUND, "market not found".into()))?;
@@ -79,7 +130,33 @@ pub async fn place_order(
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "engine dropped".into()))?;
 
-    Ok(Json(PlaceOrderRes {
+    if !trades.is_empty() {
+        println!("Matched {} trade(s), remaining qty: {}", trades.len(), rem);
+        println!("Executing on Solana...");
+        let signature = crate::solana::execute_trades_on_chain(
+            &state.rpc,
+            &req.market_address,
+            trades.clone(),
+            req.share,
+        )
+        .await
+        .map_err(|e| {
+            eprintln!("Solana execution failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Solana error: {}", e),
+            )
+        })?;
+
+        println!("Transaction confirmed: {}", signature);
+    } else {
+        println!(
+            "Order placed in orderbook (no match), remaining qty: {}",
+            rem
+        );
+    }
+
+    Ok(Json(PlaceOrderRes::Success {
         order_id,
         trades,
         remaining_qty: rem,
@@ -123,19 +200,6 @@ pub async fn cancel_order(
     } else {
         Err((StatusCode::INTERNAL_SERVER_ERROR, message))
     }
-}
-
-/// Response structure for orderbook snapshot
-#[derive(Debug, Serialize)]
-pub struct OrderBookResponse {
-    pub yes: OrderBookSide,
-    pub no: OrderBookSide,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderBookSide {
-    pub bids: Vec<SnapshotData>,
-    pub asks: Vec<SnapshotData>,
 }
 
 pub async fn get_orderbook(
