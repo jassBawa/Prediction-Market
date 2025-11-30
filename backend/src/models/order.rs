@@ -57,3 +57,10 @@ pub struct OrderBookResponse {
     pub yes: OrderBookSide,
     pub no: OrderBookSide,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct SplitOrderReq {
+    pub market_id: String,
+    pub market_address: String,
+    pub amount: u64,
+}

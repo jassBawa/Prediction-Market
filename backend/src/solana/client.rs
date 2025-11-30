@@ -142,3 +142,15 @@ impl SolanaClient {
         })
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct SplitTokenAccounts {
+    pub market: String,
+    pub user_collateral: String,
+    pub collateral_vault: String,
+    pub yes_mint: String,
+    pub no_mint: String,
+    pub yes_ata: String,
+    pub no_ata: String,
+    pub user: String,
+}

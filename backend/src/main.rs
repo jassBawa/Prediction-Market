@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let solana_client = SolanaClient::new(
         std::env::var("SOLANA_RPC_URL")
             .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string()),
-        "CxTfQPv74sJmzzTkSQvM569yJGmCpW7T3xjMub2DQrwW".to_string(),
+        "6reqwjR1am9E9ZgekF94JPeXM3Jo2RHN5K9RRC2yyuxz".to_string(),
         std::env::var("SOLANA_KEYPAIR_PATH").unwrap_or_else(|_| {
             "../solana-prediction-market-program/target/deploy/predix_program-keypair.json"
                 .to_string()

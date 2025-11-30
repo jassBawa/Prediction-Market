@@ -117,7 +117,6 @@ pub async fn generate_approval_transaction(
 
     if approve_ix.accounts.len() >= 4 {
         let delegate_in_instruction = approve_ix.accounts[2].pubkey;
-        println!("✅ Approve instruction delegate verification:");
         println!("   Delegate in instruction: {}", delegate_in_instruction);
         println!("   Expected market_pda: {}", market_pda);
         if delegate_in_instruction != market_pda {
@@ -126,7 +125,7 @@ pub async fn generate_approval_transaction(
                 delegate_in_instruction, market_pda
             ).into());
         }
-        println!("   ✅ Delegate matches market_pda correctly!");
+        println!("   Delegate matches market_pda correctly!");
     } else {
         return Err(anyhow::anyhow!(
             "Invalid approve_checked instruction: expected at least 4 accounts, got {}",
@@ -150,7 +149,7 @@ pub async fn generate_approval_transaction(
     let tx_base64 = base64::encode(&serialized);
     let recent_blockhash_str = recent_blockhash.to_string();
 
-    println!("✅ Transaction generated successfully!");
+    println!("Transaction generated successfully!");
     println!("   Transaction size: {} bytes", serialized.len());
     println!("   Base64 length: {} chars", tx_base64.len());
     println!("   Recent blockhash: {}", recent_blockhash_str);
@@ -472,4 +471,127 @@ fn get_ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         &associated_token_program_id,
     );
     ata
+}
+
+pub async fn generate_split_transaction(
+    client: &SolanaClient,
+    market_address: &str,
+    user_wallet: &str,
+    amount: u64,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let rpc = RpcClient::new(client.rpc_url());
+    let program_pubkey = Pubkey::from_str(client.program_id())?;
+    let market_pubkey = Pubkey::from_str(market_address)?;
+    let user_pubkey = Pubkey::from_str(user_wallet)?;
+
+    // Get market account to extract market_id
+    let account = rpc.get_account(&market_pubkey)?;
+    use anchor_lang::AnchorDeserialize;
+    let mut data = &account.data[8..];
+    let market = Market::deserialize(&mut data)
+        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
+    let market_id = market.market_id;
+
+    // Get fee payer
+    let payer_private_key = std::env::var("FEE_PAYER_PRIVATE_KEY")
+        .map_err(|e| anyhow::anyhow!("FEE_PAYER_PRIVATE_KEY not set: {}", e))?;
+    let fee_payer = Keypair::from_base58_string(&payer_private_key);
+
+    let recent_blockhash = rpc
+        .get_latest_blockhash()
+        .map_err(|e| anyhow::anyhow!("RPC error: {}", e))?;
+
+    println!("=== GENERATING SPLIT TOKEN TRANSACTION ===");
+    println!("Market address: {}", market_address);
+    println!("Market ID: {}", market_id);
+    println!("User wallet: {}", user_wallet);
+    println!("Amount: {}", amount);
+
+    // Derive all required accounts
+    let collateral_mint = market.collateral_mint;
+    let collateral_vault = market.collateral_vault;
+    let yes_mint = market.yes_mint;
+    let no_mint = market.no_mint;
+
+    println!("market {:?}", market);
+
+    let user_collateral = get_ata_address(&user_pubkey, &collateral_mint);
+    let yes_ata = get_ata_address(&user_pubkey, &yes_mint);
+    let no_ata = get_ata_address(&user_pubkey, &no_mint);
+
+    println!("User collateral ATA: {}", user_collateral);
+    println!("Yes ATA: {}", yes_ata);
+    println!("No ATA: {}", no_ata);
+
+    // Build the split_token instruction using anchor_client
+    use anchor_client::{Client, Cluster};
+    use std::sync::Arc;
+
+    let cluster =
+        if client.rpc_url().contains("localhost") || client.rpc_url().contains("127.0.0.1") {
+            Cluster::Localnet
+        } else if client.rpc_url().contains("devnet") {
+            Cluster::Devnet
+        } else if client.rpc_url().contains("mainnet") {
+            Cluster::Mainnet
+        } else {
+            Cluster::Custom(client.rpc_url().to_string(), client.rpc_url().to_string())
+        };
+
+    // Store fee_payer pubkey before moving into Arc
+    let fee_payer_pubkey = fee_payer.pubkey();
+    let fee_payer_arc: Arc<Keypair> = Arc::new(fee_payer);
+    let provider = Client::new_with_options(
+        cluster,
+        fee_payer_arc.clone(),
+        anchor_client::solana_sdk::commitment_config::CommitmentConfig::confirmed(),
+    );
+
+    let program = provider.program(program_pubkey)?;
+
+    // Build the instruction using anchor_client pattern (like pm-cli)
+    let instruction = program
+        .request()
+        .accounts(predix_program::accounts::SplitToken {
+            market: market_pubkey,
+            collateral_vault,
+            yes_mint,
+            no_mint,
+            yes_ata,
+            no_ata,
+            user_collateral,
+            token_program: spl_token::ID,
+            system_program: solana_sdk::system_program::ID,
+            associated_token_program: anchor_spl::associated_token::ID,
+            rent: solana_sdk::sysvar::rent::ID,
+            user: user_pubkey,
+        })
+        .args(predix_program::instruction::SplitToken { market_id, amount })
+        .instructions()?
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("Failed to build instruction"))?;
+
+    // Create transaction with fee payer as payer, user will sign as required signer
+    let message = Message::new(&[instruction], Some(&fee_payer_pubkey));
+    let mut tx = Transaction::new_unsigned(message);
+
+    // Partially sign with fee payer
+    tx.try_partial_sign(&[&*fee_payer_arc], recent_blockhash)
+        .map_err(|e| anyhow::anyhow!("Failed to partially sign transaction: {}", e))?;
+
+    // Serialize transaction
+    let serialized = bincode::serialize(&tx)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
+
+    #[allow(deprecated)]
+    let tx_base64 = base64::encode(&serialized);
+    let recent_blockhash_str = recent_blockhash.to_string();
+
+    println!("Transaction generated successfully!");
+    println!("   Transaction size: {} bytes", serialized.len());
+    println!("   Base64 length: {} chars", tx_base64.len());
+    println!("   Recent blockhash: {}", recent_blockhash_str);
+    println!();
+
+    Ok((tx_base64, recent_blockhash_str))
 }
