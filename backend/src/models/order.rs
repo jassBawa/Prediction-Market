@@ -64,3 +64,10 @@ pub struct SplitOrderReq {
     pub market_address: String,
     pub amount: u64,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct MergeOrderReq {
+    pub market_id: String,
+    pub market_address: String,
+    pub amount: u64,
+}

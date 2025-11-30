@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::{
     auth::claims::AuthUser,
     models::order::{
-        CancelReq, CancelRes, OrderBookResponse, OrderBookSide, PlaceOrderReq, PlaceOrderRes,
-        SplitOrderReq,
+        CancelReq, CancelRes, MergeOrderReq, OrderBookResponse, OrderBookSide, PlaceOrderReq,
+        PlaceOrderRes, SplitOrderReq,
     },
     state::Shared,
 };
@@ -262,6 +262,32 @@ pub async fn split_order(
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to generate split transaction: {}", e),
+        )
+    })?;
+
+    Ok(Json(PlaceOrderRes::DelegationRequired {
+        tx_message,
+        recent_blockhash,
+    }))
+}
+
+pub async fn merge_order(
+    State(state): State<Shared>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<MergeOrderReq>,
+) -> Result<Json<PlaceOrderRes>, (StatusCode, String)> {
+    let (tx_message, recent_blockhash) = crate::solana::generate_merge_transaction(
+        &state.rpc,
+        &req.market_address,
+        &user.solana_address,
+        req.amount,
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("Failed to generate merge transaction: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate merge transaction: {}", e),
         )
     })?;
 

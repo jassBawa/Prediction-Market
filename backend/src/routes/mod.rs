@@ -29,6 +29,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/orders/close", post(orders::cancel_order))
         .route("/orderbook/{market_id}", get(orders::get_orderbook))
         .route("/orders/split", post(orders::split_order))
+        .route("/orders/merge", post(orders::merge_order))
         .layer(middleware::from_fn(auth_middleware))
         .with_state(shared.clone());
 
