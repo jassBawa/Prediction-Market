@@ -15,17 +15,21 @@ use spl_token::instruction::approve_checked;
 use std::{str::FromStr, sync::Arc};
 
 use crate::solana::{
+    accounts::get_ata_address,
     market::{
         derive::derive_share_mints, derive_market_pda, derive_share_mint, fetch::fetch_market,
     },
     utils::{decimal_to_lamports, detect_cluster, load_fee_payer, serialize_transaction},
 };
 
+pub mod accounts;
 pub mod client;
 pub mod market;
 pub mod trading;
 pub mod types;
 pub mod utils;
+
+pub use accounts::verify_delegation;
 
 pub async fn generate_approval_transaction(
     client: &SolanaClient,
@@ -269,160 +273,6 @@ fn build_remaining_accounts(
     }
 
     Ok(accounts)
-}
-
-pub async fn verify_delegation(
-    client: &SolanaClient,
-    market_address: &str,
-    user_wallet: &str,
-    side: Side,
-    share_type: ShareType,
-    price: Decimal,
-    qty: Decimal,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    let rpc = RpcClient::new(client.rpc_url());
-    println!("{market_address} {user_wallet} {}", client.program_id());
-    let program_pubkey = Pubkey::from_str(client.program_id())?;
-    let market_pubkey = Pubkey::from_str(market_address)?;
-    let user_pubkey = Pubkey::from_str(user_wallet)?;
-
-    let market = fetch_market(&rpc, &market_pubkey)?;
-    let market_id = market.market_id;
-    let collateral_mint = market.collateral_mint;
-
-    let (market_pda, _bump) = derive_market_pda(&program_pubkey, market_id);
-
-    // Verify the market_pubkey matches the calculated PDA (it should, since market is a PDA)
-    if market_pubkey != market_pda {
-        return Err(anyhow::anyhow!(
-            "Market address {} does not match calculated PDA {} for market_id {}",
-            market_pubkey,
-            market_pda,
-            market_id
-        )
-        .into());
-    }
-
-    let market_pda = market_pda;
-
-    println!("=== DELEGATION VERIFICATION DEBUG ===");
-    println!("Market address: {}", market_address);
-    println!("Market ID: {}", market_id);
-    println!("Program ID: {}", program_pubkey);
-    println!("Calculated market_pda: {}", market_pda);
-
-    let (token_account_pubkey, required_amount_lamports) = match side {
-        Side::Bid => {
-            let collateral_ata = get_ata_address(&user_pubkey, &collateral_mint);
-            let required = decimal_to_lamports(qty * price)?;
-            (collateral_ata, required as u64)
-        }
-        Side::Ask => {
-            let share_mint = derive_share_mint(&program_pubkey, market_id, share_type);
-            let share_ata = get_ata_address(&user_pubkey, &share_mint);
-            let required = decimal_to_lamports(qty * price)?;
-            (share_ata, required as u64)
-        }
-    };
-
-    let account = match rpc.get_account(&token_account_pubkey) {
-        Ok(acc) => acc,
-        Err(_) => {
-            return Ok(false);
-        }
-    };
-
-    let account_data = account.data;
-
-    if account_data.len() < 165 {
-        return Err(anyhow::anyhow!("Invalid token account data length").into());
-    };
-
-    let delegate_byte = account_data[72];
-    let delegate = if delegate_byte == 1 {
-        Some(
-            Pubkey::try_from(&account_data[73..105])
-                .map_err(|_| anyhow::anyhow!("Invalid delegate pubkey"))?,
-        )
-    } else {
-        None
-    };
-
-    let delegated_amount = u64::from_le_bytes(
-        account_data[105..113]
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid delegated_amount"))?,
-    );
-
-    println!("delegated_amount = {}", delegated_amount);
-    println!("required = {}", required_amount_lamports);
-
-    struct TokenAccountInfo {
-        delegate: Option<Pubkey>,
-        delegated_amount: u64,
-    }
-
-    let token_account_info = TokenAccountInfo {
-        delegate,
-        delegated_amount,
-    };
-
-    println!("User pubkey: {}", user_pubkey);
-    println!("Collateral mint: {}", collateral_mint);
-    println!("ATA: {}", token_account_pubkey);
-    println!("Required amount: {}", required_amount_lamports);
-    println!("Market ID: {}", market_id);
-    println!("Calculated market_pda: {}", market_pda);
-    println!(
-        "Delegate in token account: {:?}",
-        token_account_info.delegate
-    );
-    println!("Delegated amount: {}", token_account_info.delegated_amount);
-
-    match token_account_info.delegate {
-        Some(delegate) if delegate == market_pda => {
-            println!("Delegate matches market_pda! Checking amounts...");
-            let sufficient = token_account_info.delegated_amount >= required_amount_lamports;
-            println!(
-                "Delegated: {}, Required: {}, Sufficient: {}",
-                token_account_info.delegated_amount, required_amount_lamports, sufficient
-            );
-            Ok(sufficient)
-        }
-        Some(delegate) => {
-            // println!("❌ DELEGATE MISMATCH!");
-            // println!("   Expected delegate (market_pda): {}", market_pda);
-            // println!("   Found delegate in token account: {}", delegate);
-            // println!("   Token account ATA: {}", token_account_pubkey);
-            // println!("   User wallet: {}", user_pubkey);
-            // println!("   Market address: {}", market_pubkey);
-            // println!("   Market ID: {}", market_id);
-            // println!();
-            // println!("    CRITICAL: You have delegated to a DIFFERENT address!");
-            // println!(
-            //     "   This means you signed a transaction that delegated to: {}",
-            //     delegate
-            // );
-            println!("   But you need to delegate to: {}", market_pda);
-            println!();
-            Ok(false)
-        }
-        None => {
-            println!("❌ No delegate set in token account");
-            Ok(false)
-        }
-    }
-}
-
-fn get_ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let associated_token_program_id =
-        Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
-            .expect("Invalid Associated Token Program ID");
-    let (ata, _) = Pubkey::find_program_address(
-        &[owner.as_ref(), spl_token::id().as_ref(), mint.as_ref()],
-        &associated_token_program_id,
-    );
-    ata
 }
 
 pub async fn generate_split_transaction(
