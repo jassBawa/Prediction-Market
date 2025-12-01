@@ -5,8 +5,8 @@ use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 use crate::solana::{
+    accounts::get_ata_address,
     client::SolanaClient,
-    get_ata_address,
     market::{derive_market_pda, derive_share_mint, fetch_market},
     utils::decimal_to_lamports,
 };
