@@ -1,9 +1,8 @@
+use anchor_client::{solana_sdk::pubkey::Pubkey, Client};
 use solana_client::rpc_client::RpcClient;
 
-use solana_sdk::{
-    message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
-};
-use std::str::FromStr;
+use solana_sdk::{message::Message, signature::Keypair, signer::Signer, transaction::Transaction};
+use std::{str::FromStr, sync::Arc};
 
 use crate::solana::{
     accounts::get_ata_address,
@@ -12,7 +11,7 @@ use crate::solana::{
     utils::{detect_cluster, load_fee_payer, serialize_transaction},
 };
 
-pub async fn generate_split_transaction(
+pub async fn generate_merge_transaction(
     client: &SolanaClient,
     market_address: &str,
     user_wallet: &str,
@@ -24,7 +23,6 @@ pub async fn generate_split_transaction(
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
     let market = fetch_market(&rpc, &market_pubkey)?;
-
     let market_id = market.market_id;
 
     // Get fee payer
@@ -34,17 +32,17 @@ pub async fn generate_split_transaction(
         .get_latest_blockhash()
         .map_err(|e| anyhow::anyhow!("RPC error: {}", e))?;
 
+    // Derive all required accounts
     let collateral_mint = market.collateral_mint;
     let collateral_vault = market.collateral_vault;
     let yes_mint = market.yes_mint;
     let no_mint = market.no_mint;
 
+    println!("market {:?}", market);
+
     let user_collateral = get_ata_address(&user_pubkey, &collateral_mint);
     let yes_ata = get_ata_address(&user_pubkey, &yes_mint);
     let no_ata = get_ata_address(&user_pubkey, &no_mint);
-
-    use anchor_client::Client;
-    use std::sync::Arc;
 
     let cluster = detect_cluster(client.rpc_url());
 
@@ -61,21 +59,19 @@ pub async fn generate_split_transaction(
 
     let instruction = program
         .request()
-        .accounts(predix_program::accounts::SplitToken {
+        .accounts(predix_program::accounts::MergeToken {
+            user: user_pubkey,
             market: market_pubkey,
             collateral_vault,
+            user_collateral,
             yes_mint,
             no_mint,
             yes_ata,
             no_ata,
-            user_collateral,
-            token_program: spl_token::ID,
             system_program: solana_sdk::system_program::ID,
-            associated_token_program: anchor_spl::associated_token::ID,
-            rent: solana_sdk::sysvar::rent::ID,
-            user: user_pubkey,
+            token_program: spl_token::ID,
         })
-        .args(predix_program::instruction::SplitToken { market_id, amount })
+        .args(predix_program::instruction::MergeTokens { market_id, amount })
         .instructions()?
         .pop()
         .ok_or_else(|| anyhow::anyhow!("Failed to build instruction"))?;
