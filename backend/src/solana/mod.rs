@@ -1,19 +1,31 @@
-use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_client::{solana_sdk::pubkey::Pubkey, Client};
+use anyhow::{self, Result};
+use client::SolanaClient;
 use matching_engine::{ShareType, Side, Trade};
-use predix_program::state::Market;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{message::Message, signature::Keypair, signer::Signer, transaction::Transaction};
+use solana_sdk::{
+    message::v0::Message as V0Message,
+    message::{Message, VersionedMessage},
+    signature::Keypair,
+    signer::Signer,
+    transaction::{Transaction, VersionedTransaction},
+};
 use spl_token::instruction::approve_checked;
-use std::str::FromStr;
-pub mod client;
-use anyhow::{self, Result};
-use base64;
-use bincode;
-pub mod types;
+use std::{str::FromStr, sync::Arc};
 
-use client::SolanaClient;
+use crate::solana::{
+    market::{
+        derive::derive_share_mints, derive_market_pda, derive_share_mint, fetch::fetch_market,
+    },
+    utils::{decimal_to_lamports, detect_cluster, load_fee_payer, serialize_transaction},
+};
+
+pub mod client;
+pub mod market;
+pub mod trading;
+pub mod types;
+pub mod utils;
 
 pub async fn generate_approval_transaction(
     client: &SolanaClient,
@@ -26,50 +38,30 @@ pub async fn generate_approval_transaction(
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
     let rpc = RpcClient::new(client.rpc_url());
     let program_pubkey = Pubkey::from_str(client.program_id())?;
-    let market_pubkey = Pubkey::from_str(market_address)?;
     let user_pubkey = Pubkey::from_str(user_wallet)?;
+    let market_pubkey = Pubkey::from_str(market_address)?;
 
-    let account = rpc.get_account(&market_pubkey)?;
-    use anchor_lang::AnchorDeserialize;
-    let mut data = &account.data[8..];
-    let market = Market::deserialize(&mut data)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
+    let market = fetch_market(&rpc, &market_pubkey)?;
+
     let market_id = market.market_id;
     let collateral_mint = market.collateral_mint;
 
     let (mint_pubkey, user_ata_pubkey, required_amount_lamports) = match side {
         Side::Bid => {
             let collateral_ata = get_ata_address(&user_pubkey, &collateral_mint);
-            let required = (qty * price)
-                .to_f64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid price/quantity: cannot convert to f64"))?
-                * 1_000_000.0;
+            let required = decimal_to_lamports(qty * price)?;
             (collateral_mint, collateral_ata, required as u64)
         }
         Side::Ask => {
-            let (share_mint, _) = match share_type {
-                ShareType::Yes => Pubkey::find_program_address(
-                    &[b"yes_mint", &market_id.to_le_bytes()],
-                    &program_pubkey,
-                ),
-                ShareType::No => Pubkey::find_program_address(
-                    &[b"no_mint", &market_id.to_le_bytes()],
-                    &program_pubkey,
-                ),
-            };
+            let share_mint = derive_share_mint(&program_pubkey, market_id, share_type);
             let share_ata = get_ata_address(&user_pubkey, &share_mint);
-            let required = qty
-                .to_f64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid quantity: cannot convert to f64"))?
-                * 1_000_000.0;
+            let required = decimal_to_lamports(qty)?;
             (share_mint, share_ata, required as u64)
         }
     };
 
     // Get fee payer
-    let payer_private_key = std::env::var("FEE_PAYER_PRIVATE_KEY")
-        .map_err(|e| anyhow::anyhow!("FEE_PAYER_PRIVATE_KEY not set: {}", e))?;
-    let fee_payer = Keypair::from_base58_string(&payer_private_key);
+    let fee_payer = load_fee_payer()?;
 
     let recent_blockhash = rpc
         .get_latest_blockhash()
@@ -81,10 +73,7 @@ pub async fn generate_approval_transaction(
     );
     println!("Blockhash: {} (expires in ~60 seconds)", recent_blockhash);
 
-    let (market_pda, _bump) = Pubkey::find_program_address(
-        &[b"market".as_ref(), &market_id.to_le_bytes()],
-        &program_pubkey,
-    );
+    let (market_pda, _bump) = derive_market_pda(&program_pubkey, market_id);
 
     if market_pda != market_pubkey {
         return Err(anyhow::anyhow!(
@@ -134,23 +123,34 @@ pub async fn generate_approval_transaction(
         .into());
     }
 
-    let message = Message::new(&[approve_ix], Some(&fee_payer.pubkey()));
-    let mut tx = Transaction::new_unsigned(message);
+    // Build VersionedTransaction using V0Message
+    let v0_msg = V0Message::try_compile(&fee_payer.pubkey(), &[approve_ix], &[], recent_blockhash)
+        .map_err(|e| anyhow::anyhow!("Failed to compile V0 message: {}", e))?;
 
-    // Partially sign with fee payer
-    tx.try_partial_sign(&[&fee_payer], recent_blockhash)
-        .map_err(|e| anyhow::anyhow!("Failed to partially sign transaction: {}", e))?;
+    // Wrap V0Message in VersionedMessage
+    let versioned_msg = VersionedMessage::V0(v0_msg);
 
-    // Serialize transaction
-    let serialized = bincode::serialize(&tx)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
+    // Create unsigned VersionedTransaction first
+    let num_signatures = versioned_msg.header().num_required_signatures as usize;
+    let mut tx = VersionedTransaction {
+        signatures: vec![solana_sdk::signature::Signature::default(); num_signatures],
+        message: versioned_msg,
+    };
 
-    #[allow(deprecated)]
-    let tx_base64 = base64::encode(&serialized);
-    let recent_blockhash_str = recent_blockhash.to_string();
+    // Partially sign with fee payer only
+    // The fee payer should be the first signer (position 0)
+    let message_bytes = tx.message.serialize();
+    let fee_payer_signature = fee_payer
+        .try_sign_message(&message_bytes)
+        .map_err(|e| anyhow::anyhow!("Failed to sign with fee payer: {}", e))?;
 
+    // Place the fee payer's signature in position 0
+    tx.signatures[0] = fee_payer_signature;
+
+    // Serialize VersionedTransaction
+    let (tx_base64, recent_blockhash_str) = serialize_transaction(&tx, &recent_blockhash)?;
     println!("Transaction generated successfully!");
-    println!("   Transaction size: {} bytes", serialized.len());
+
     println!("   Base64 length: {} chars", tx_base64.len());
     println!("   Recent blockhash: {}", recent_blockhash_str);
     println!();
@@ -167,22 +167,12 @@ async fn get_market_mints(
     let market_pubkey = Pubkey::from_str(market_address)?;
     let program_pubkey = Pubkey::from_str(program_id)?;
 
-    let account = rpc.get_account(&market_pubkey)?;
-
-    use anchor_lang::AnchorDeserialize;
-
-    let mut data = &account.data[8..];
-    let market = Market::deserialize(&mut data)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
+    let market = fetch_market(&rpc, &market_pubkey)?;
 
     let market_id = market.market_id;
     let collateral_mint = market.collateral_mint;
 
-    let (yes_mint, _) =
-        Pubkey::find_program_address(&[b"yes_mint", &market_id.to_le_bytes()], &program_pubkey);
-
-    let (no_mint, _) =
-        Pubkey::find_program_address(&[b"no_mint", &market_id.to_le_bytes()], &program_pubkey);
+    let (yes_mint, no_mint) = derive_share_mints(&program_pubkey, market_id);
 
     let share_mint = match share_type {
         ShareType::Yes => yes_mint,
@@ -281,11 +271,6 @@ fn build_remaining_accounts(
     Ok(accounts)
 }
 
-fn decimal_to_lamports(decimal: Decimal) -> Result<u64, Box<dyn std::error::Error>> {
-    let lamports = (decimal.to_f64().unwrap() * 1_000_000.0) as u64;
-    Ok(lamports)
-}
-
 pub async fn verify_delegation(
     client: &SolanaClient,
     market_address: &str,
@@ -301,61 +286,41 @@ pub async fn verify_delegation(
     let market_pubkey = Pubkey::from_str(market_address)?;
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
-    let account = rpc.get_account(&market_pubkey)?;
-    use anchor_lang::AnchorDeserialize;
-    let mut data = &account.data[8..];
-    let market = Market::deserialize(&mut data)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
-
+    let market = fetch_market(&rpc, &market_pubkey)?;
     let market_id = market.market_id;
     let collateral_mint = market.collateral_mint;
 
-    // Get the bump from the market account (it's stored in the account data)
-    // The market account has a bump field - we should use it for verification
-    // But first, let's calculate the PDA to compare
-    let (calculated_pda, calculated_bump) =
-        Pubkey::find_program_address(&[b"market", &market_id.to_le_bytes()], &program_pubkey);
+    let (market_pda, _bump) = derive_market_pda(&program_pubkey, market_id);
 
     // Verify the market_pubkey matches the calculated PDA (it should, since market is a PDA)
-    if market_pubkey != calculated_pda {
+    if market_pubkey != market_pda {
         return Err(anyhow::anyhow!(
             "Market address {} does not match calculated PDA {} for market_id {}",
             market_pubkey,
-            calculated_pda,
+            market_pda,
             market_id
         )
         .into());
     }
 
-    let market_pda = calculated_pda;
-    let _bump = calculated_bump;
+    let market_pda = market_pda;
 
     println!("=== DELEGATION VERIFICATION DEBUG ===");
     println!("Market address: {}", market_address);
     println!("Market ID: {}", market_id);
     println!("Program ID: {}", program_pubkey);
     println!("Calculated market_pda: {}", market_pda);
-    println!("Market PDA bump: {}", _bump);
 
     let (token_account_pubkey, required_amount_lamports) = match side {
         Side::Bid => {
             let collateral_ata = get_ata_address(&user_pubkey, &collateral_mint);
-            let required = (qty * price).to_f64().unwrap() * 1_000_000.0;
+            let required = decimal_to_lamports(qty * price)?;
             (collateral_ata, required as u64)
         }
         Side::Ask => {
-            let (share_mint, _) = match share_type {
-                ShareType::Yes => Pubkey::find_program_address(
-                    &[b"yes_mint", &market_id.to_le_bytes()],
-                    &program_pubkey,
-                ),
-                ShareType::No => Pubkey::find_program_address(
-                    &[b"no_mint", &market_id.to_le_bytes()],
-                    &program_pubkey,
-                ),
-            };
+            let share_mint = derive_share_mint(&program_pubkey, market_id, share_type);
             let share_ata = get_ata_address(&user_pubkey, &share_mint);
-            let required = qty.to_f64().unwrap() * 1_000_000.0;
+            let required = decimal_to_lamports(qty * price)?;
             (share_ata, required as u64)
         }
     };
@@ -416,7 +381,7 @@ pub async fn verify_delegation(
 
     match token_account_info.delegate {
         Some(delegate) if delegate == market_pda => {
-            println!("✅ Delegate matches market_pda! Checking amounts...");
+            println!("Delegate matches market_pda! Checking amounts...");
             let sufficient = token_account_info.delegated_amount >= required_amount_lamports;
             println!(
                 "Delegated: {}, Required: {}, Sufficient: {}",
@@ -425,34 +390,21 @@ pub async fn verify_delegation(
             Ok(sufficient)
         }
         Some(delegate) => {
-            println!("❌ DELEGATE MISMATCH!");
-            println!("   Expected delegate (market_pda): {}", market_pda);
-            println!("   Found delegate in token account: {}", delegate);
-            println!("   Token account ATA: {}", token_account_pubkey);
-            println!("   User wallet: {}", user_pubkey);
-            println!("   Market address: {}", market_pubkey);
-            println!("   Market ID: {}", market_id);
-            println!();
-            println!("    CRITICAL: You have delegated to a DIFFERENT address!");
-            println!(
-                "   This means you signed a transaction that delegated to: {}",
-                delegate
-            );
+            // println!("❌ DELEGATE MISMATCH!");
+            // println!("   Expected delegate (market_pda): {}", market_pda);
+            // println!("   Found delegate in token account: {}", delegate);
+            // println!("   Token account ATA: {}", token_account_pubkey);
+            // println!("   User wallet: {}", user_pubkey);
+            // println!("   Market address: {}", market_pubkey);
+            // println!("   Market ID: {}", market_id);
+            // println!();
+            // println!("    CRITICAL: You have delegated to a DIFFERENT address!");
+            // println!(
+            //     "   This means you signed a transaction that delegated to: {}",
+            //     delegate
+            // );
             println!("   But you need to delegate to: {}", market_pda);
             println!();
-            println!("   SOLUTION:");
-            println!("   1. Make sure you are signing the FRESH transaction from this API call");
-            println!("   2. Do NOT use any cached/old transactions");
-            println!(
-                "   3. The transaction we just generated will delegate to: {}",
-                market_pda
-            );
-            println!("   4. Sign and submit the NEW transaction IMMEDIATELY (< 60 seconds)");
-            println!("   5. Wait for on-chain confirmation");
-            println!("   6. Retry placing the order");
-            println!();
-            println!("     NOTE: The approve_checked instruction will REPLACE the old delegate.");
-            println!("   Just sign the NEW transaction we returned - don't revoke manually.");
             Ok(false)
         }
         None => {
@@ -484,59 +436,30 @@ pub async fn generate_split_transaction(
     let market_pubkey = Pubkey::from_str(market_address)?;
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
-    // Get market account to extract market_id
-    let account = rpc.get_account(&market_pubkey)?;
-    use anchor_lang::AnchorDeserialize;
-    let mut data = &account.data[8..];
-    let market = Market::deserialize(&mut data)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
+    let market = fetch_market(&rpc, &market_pubkey)?;
+
     let market_id = market.market_id;
 
     // Get fee payer
-    let payer_private_key = std::env::var("FEE_PAYER_PRIVATE_KEY")
-        .map_err(|e| anyhow::anyhow!("FEE_PAYER_PRIVATE_KEY not set: {}", e))?;
-    let fee_payer = Keypair::from_base58_string(&payer_private_key);
+    let fee_payer = load_fee_payer()?;
 
     let recent_blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| anyhow::anyhow!("RPC error: {}", e))?;
 
-    // println!("=== GENERATING SPLIT TOKEN TRANSACTION ===");
-    // println!("Market address: {}", market_address);
-    // println!("Market ID: {}", market_id);
-    // println!("User wallet: {}", user_wallet);
-    // println!("Amount: {}", amount);
-
-    // Derive all required accounts
     let collateral_mint = market.collateral_mint;
     let collateral_vault = market.collateral_vault;
     let yes_mint = market.yes_mint;
     let no_mint = market.no_mint;
 
-    // println!("market {:?}", market);
-
     let user_collateral = get_ata_address(&user_pubkey, &collateral_mint);
     let yes_ata = get_ata_address(&user_pubkey, &yes_mint);
     let no_ata = get_ata_address(&user_pubkey, &no_mint);
 
-    // println!("User collateral ATA: {}", user_collateral);
-    // println!("Yes ATA: {}", yes_ata);
-    // println!("No ATA: {}", no_ata);
-
-    // Build the split_token instruction using anchor_client
-    use anchor_client::{Client, Cluster};
+    use anchor_client::Client;
     use std::sync::Arc;
 
-    let cluster =
-        if client.rpc_url().contains("localhost") || client.rpc_url().contains("127.0.0.1") {
-            Cluster::Localnet
-        } else if client.rpc_url().contains("devnet") {
-            Cluster::Devnet
-        } else if client.rpc_url().contains("mainnet") {
-            Cluster::Mainnet
-        } else {
-            Cluster::Custom(client.rpc_url().to_string(), client.rpc_url().to_string())
-        };
+    let cluster = detect_cluster(client.rpc_url());
 
     // Store fee_payer pubkey before moving into Arc
     let fee_payer_pubkey = fee_payer.pubkey();
@@ -549,7 +472,6 @@ pub async fn generate_split_transaction(
 
     let program = provider.program(program_pubkey)?;
 
-    // Build the instruction using anchor_client pattern (like pm-cli)
     let instruction = program
         .request()
         .accounts(predix_program::accounts::SplitToken {
@@ -571,27 +493,13 @@ pub async fn generate_split_transaction(
         .pop()
         .ok_or_else(|| anyhow::anyhow!("Failed to build instruction"))?;
 
-    // Create transaction with fee payer as payer, user will sign as required signer
     let message = Message::new(&[instruction], Some(&fee_payer_pubkey));
     let mut tx = Transaction::new_unsigned(message);
 
-    // Partially sign with fee payer
     tx.try_partial_sign(&[&*fee_payer_arc], recent_blockhash)
         .map_err(|e| anyhow::anyhow!("Failed to partially sign transaction: {}", e))?;
 
-    // Serialize transaction
-    let serialized = bincode::serialize(&tx)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
-
-    #[allow(deprecated)]
-    let tx_base64 = base64::encode(&serialized);
-    let recent_blockhash_str = recent_blockhash.to_string();
-
-    // println!("Transaction generated successfully!");
-    // println!("   Transaction size: {} bytes", serialized.len());
-    // println!("   Base64 length: {} chars", tx_base64.len());
-    // println!("   Recent blockhash: {}", recent_blockhash_str);
-    // println!();
+    let (tx_base64, recent_blockhash_str) = serialize_transaction(&tx, &recent_blockhash)?;
 
     Ok((tx_base64, recent_blockhash_str))
 }
@@ -607,28 +515,15 @@ pub async fn generate_merge_transaction(
     let market_pubkey = Pubkey::from_str(market_address)?;
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
-    // Get market account to extract market_id
-    let account = rpc.get_account(&market_pubkey)?;
-    use anchor_lang::AnchorDeserialize;
-    let mut data = &account.data[8..];
-    let market = Market::deserialize(&mut data)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize market: {}", e))?;
+    let market = fetch_market(&rpc, &market_pubkey)?;
     let market_id = market.market_id;
 
     // Get fee payer
-    let payer_private_key = std::env::var("FEE_PAYER_PRIVATE_KEY")
-        .map_err(|e| anyhow::anyhow!("FEE_PAYER_PRIVATE_KEY not set: {}", e))?;
-    let fee_payer = Keypair::from_base58_string(&payer_private_key);
+    let fee_payer = load_fee_payer()?;
 
     let recent_blockhash = rpc
         .get_latest_blockhash()
         .map_err(|e| anyhow::anyhow!("RPC error: {}", e))?;
-
-    println!("=== GENERATING MERGE TOKEN TRANSACTION ===");
-    println!("Market address: {}", market_address);
-    println!("Market ID: {}", market_id);
-    println!("User wallet: {}", user_wallet);
-    println!("Amount: {}", amount);
 
     // Derive all required accounts
     let collateral_mint = market.collateral_mint;
@@ -642,24 +537,7 @@ pub async fn generate_merge_transaction(
     let yes_ata = get_ata_address(&user_pubkey, &yes_mint);
     let no_ata = get_ata_address(&user_pubkey, &no_mint);
 
-    println!("User collateral ATA: {}", user_collateral);
-    println!("Yes ATA: {}", yes_ata);
-    println!("No ATA: {}", no_ata);
-
-    // Build the split_token instruction using anchor_client
-    use anchor_client::{Client, Cluster};
-    use std::sync::Arc;
-
-    let cluster =
-        if client.rpc_url().contains("localhost") || client.rpc_url().contains("127.0.0.1") {
-            Cluster::Localnet
-        } else if client.rpc_url().contains("devnet") {
-            Cluster::Devnet
-        } else if client.rpc_url().contains("mainnet") {
-            Cluster::Mainnet
-        } else {
-            Cluster::Custom(client.rpc_url().to_string(), client.rpc_url().to_string())
-        };
+    let cluster = detect_cluster(client.rpc_url());
 
     // Store fee_payer pubkey before moving into Arc
     let fee_payer_pubkey = fee_payer.pubkey();
@@ -697,18 +575,7 @@ pub async fn generate_merge_transaction(
     tx.try_partial_sign(&[&*fee_payer_arc], recent_blockhash)
         .map_err(|e| anyhow::anyhow!("Failed to partially sign transaction: {}", e))?;
 
-    let serialized = bincode::serialize(&tx)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
-
-    #[allow(deprecated)]
-    let tx_base64 = base64::encode(&serialized);
-    let recent_blockhash_str = recent_blockhash.to_string();
-
-    println!("Transaction generated successfully!");
-    println!("   Transaction size: {} bytes", serialized.len());
-    println!("   Base64 length: {} chars", tx_base64.len());
-    println!("   Recent blockhash: {}", recent_blockhash_str);
-    println!();
+    let (tx_base64, recent_blockhash_str) = serialize_transaction(&tx, &recent_blockhash)?;
 
     Ok((tx_base64, recent_blockhash_str))
 }
