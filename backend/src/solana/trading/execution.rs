@@ -52,10 +52,10 @@ pub async fn execute_trades_on_chain(
 
     let match_fills = convert_trades_to_match_fills(&trades, share_type)?;
 
-    println!("  → Building transaction accounts...");
+    println!("Building transaction accounts...");
     let remaining_accounts = build_remaining_accounts(&trades, &collateral_mint, &share_mint)?;
 
-    println!("  → Sending transaction to Solana...");
+    println!("Sending transaction to Solana...");
     let signature = client
         .execute_match_multi(market_address, match_fills, remaining_accounts)
         .await?;

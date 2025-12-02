@@ -1,4 +1,4 @@
-use std::{env, str::FromStr};
+use std::env;
 
 use axum::{extract::State, http::StatusCode, Extension, Json};
 use base64;
@@ -11,6 +11,7 @@ use spl_token::instruction::approve_checked;
 use crate::{
     auth::claims::AuthUser,
     models::delegate::{ApproveRequest, ApproveRes},
+    routes::utils::parse_pubkey,
     state::Shared,
 };
 
@@ -20,12 +21,7 @@ pub async fn delegate_approval(
     Json(payload): Json<ApproveRequest>,
 ) -> Result<Json<ApproveRes>, (StatusCode, String)> {
     let rpc_client = &state.rpc;
-    let program_id = Pubkey::from_str(&payload.program_id).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid program id: {}", e),
-        )
-    })?;
+    let program_id = parse_pubkey(&payload.program_id, "Program id")?;
 
     let market_id = payload.market_id.parse::<u64>().map_err(|e| {
         (
@@ -33,13 +29,6 @@ pub async fn delegate_approval(
             format!("Invalid market_id (must be u64): {}", e),
         )
     })?;
-
-    // let payer_pub_key = env::var("FEE_PAYER_PUBLIC_KEY").map_err(|e| {
-    //     (
-    //         StatusCode::INTERNAL_SERVER_ERROR,
-    //         format!("FEE_PAYER_PUBLIC_KEY not set: {}", e),
-    //     )
-    // })?;
 
     let payer_private_key = env::var("FEE_PAYER_PRIVATE_KEY").map_err(|e| {
         (
@@ -56,24 +45,9 @@ pub async fn delegate_approval(
         )
     })?;
 
-    let wallet_pubkey = Pubkey::from_str(&user.solana_address).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid wallet address: {}", e),
-        )
-    })?;
-    let mint_pubkey = Pubkey::from_str(&payload.mint).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid mint address: {}", e),
-        )
-    })?;
-    let user_ata_pubkey = Pubkey::from_str(&payload.user_ata).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid user ATA address: {}", e),
-        )
-    })?;
+    let wallet_pubkey = parse_pubkey(&user.solana_address, "Wallet Pubkey")?;
+    let mint_pubkey = parse_pubkey(&payload.mint, "Mint Pubkey")?;
+    let user_ata_pubkey = parse_pubkey(&payload.user_ata, "User ata pubeky")?;
 
     let (market_pda, _bump) =
         Pubkey::find_program_address(&[b"market".as_ref(), &market_id.to_le_bytes()], &program_id);

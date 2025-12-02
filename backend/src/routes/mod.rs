@@ -14,6 +14,7 @@ use crate::{
 pub mod delegate;
 pub mod market;
 pub mod orders;
+pub mod utils;
 
 pub fn create_router(state: AppState) -> Router {
     let shared: Shared = Arc::new(state);

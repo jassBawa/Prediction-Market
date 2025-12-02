@@ -1,13 +1,10 @@
-use std::str::FromStr;
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Extension, Json,
 };
-use db::get_market_by_address;
-use rust_decimal::Decimal;
-use tokio::sync::{mpsc, oneshot};
+
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
@@ -16,19 +13,18 @@ use crate::{
         CancelReq, CancelRes, MergeOrderReq, OrderBookResponse, OrderBookSide, PlaceOrderReq,
         PlaceOrderRes, SplitOrderReq,
     },
+    routes::utils::{get_market_engine, get_or_create_market_engine, parse_decimal},
     state::Shared,
 };
-use matching_engine::{run_market_engine, EngineMsg, OrderEntry};
+use matching_engine::{EngineMsg, OrderEntry};
 
 pub async fn place_order(
     State(state): State<Shared>,
     Extension(user): Extension<AuthUser>,
     Json(req): Json<PlaceOrderReq>,
 ) -> Result<Json<PlaceOrderRes>, (StatusCode, String)> {
-    let price =
-        Decimal::from_str(&req.price).map_err(|_| (StatusCode::BAD_REQUEST, "bad price".into()))?;
-    let qty =
-        Decimal::from_str(&req.qty).map_err(|_| (StatusCode::BAD_REQUEST, "bad qty".into()))?;
+    let price = parse_decimal(&req.price, "price")?;
+    let qty = parse_decimal(&req.qty, "qty")?;
 
     println!("request body --> {:?}", req);
 
@@ -88,31 +84,8 @@ pub async fn place_order(
         "Order received: {:?} {} {} for market {}",
         req.side, qty, price, req.market_id
     );
-    let markets = state.markets.read().await;
-    let tx = if let Some(tx) = markets.get(&req.market_id) {
-        tx.clone()
-    } else {
-        drop(markets);
 
-        let _market = get_market_by_address(&state.db, &req.market_address)
-            .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error".into()))?
-            .ok_or((StatusCode::NOT_FOUND, "market not found".into()))?;
-
-        let mut markets = state.markets.write().await;
-
-        // Double-check: another request may have created the engine
-        if let Some(tx) = markets.get(&req.market_id) {
-            tx.clone()
-        } else {
-            // create new market mpsc channel
-            let (tx, rx) = mpsc::channel::<EngineMsg>(100);
-            tokio::spawn(run_market_engine(rx));
-            markets.insert(req.market_id.clone(), tx.clone());
-            tx
-        }
-    };
-
+    let tx = get_or_create_market_engine(&state, &req.market_id, &req.market_address).await?;
     let (resp_tx, resp_rx) = oneshot::channel();
     tx.send(EngineMsg::PlaceOrder {
         side: req.side,
@@ -168,12 +141,7 @@ pub async fn cancel_order(
     State(state): State<Shared>,
     Json(req): Json<CancelReq>,
 ) -> Result<Json<CancelRes>, (StatusCode, String)> {
-    let markets = state.markets.read().await;
-    let tx = if let Some(tx) = markets.get(&req.market_id) {
-        tx.clone()
-    } else {
-        return Err((StatusCode::NOT_FOUND, "market not found".into()));
-    };
+    let tx = get_market_engine(&state, &req.market_id).await?;
     let (resp_tx, resp_rx) = oneshot::channel();
 
     tx.send(EngineMsg::CloseOrder {
@@ -207,13 +175,7 @@ pub async fn get_orderbook(
     State(state): State<Shared>,
     Path(market_id): Path<String>,
 ) -> Result<Json<OrderBookResponse>, (StatusCode, String)> {
-    let markets = state.markets.read().await;
-    let tx = if let Some(tx) = markets.get(&market_id) {
-        tx.clone()
-    } else {
-        return Err((StatusCode::NOT_FOUND, "market not found".into()));
-    };
-    drop(markets);
+    let tx = get_market_engine(&state, &market_id).await?;
 
     let (resp_tx, resp_rx) = oneshot::channel();
 
