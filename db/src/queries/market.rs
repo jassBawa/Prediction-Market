@@ -120,18 +120,18 @@ pub async fn get_market_by_id(pool: &PgPool, id: i64) -> Result<Option<Market>> 
     Ok(row.map(|r| r.into()))
 }
 
-pub async fn get_next_market_by_id(pool: &PgPool) -> Result<u64> {
-    let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(market_id) FROM markets")
-        .fetch_optional(pool)
-        .await?;
+// pub async fn get_next_market_by_id(pool: &PgPool) -> Result<u64> {
+//     let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(market_id) FROM markets")
+//         .fetch_optional(pool)
+//         .await?;
 
-    let next_id = match row {
-        Some((Some(max_id),)) => max_id + 1,
-        _ => 1,
-    };
+//     let next_id = match row {
+//         Some((Some(max_id),)) => max_id + 1,
+//         _ => 1,
+//     };
 
-    Ok(next_id as u64)
-}
+//     Ok(next_id as u64)
+// }
 
 pub async fn list_markets(pool: &PgPool, limit: i64, offset: i64) -> Result<Vec<Market>> {
     let rows = sqlx::query_as::<_, MarketRow>(
