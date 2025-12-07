@@ -28,6 +28,7 @@ pub enum EngineMsg {
 
 pub async fn run_market_engine(mut rx: mpsc::Receiver<EngineMsg>) {
     let mut book = MarketBooks::new();
+    println!("Market engine started");
 
     while let Some(msg) = rx.recv().await {
         match msg {

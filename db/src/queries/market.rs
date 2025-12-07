@@ -16,6 +16,11 @@ pub async fn create_market(
     no_option: &str,
     end_timestamp: i64,
     created_slot: i64,
+    collateral_mint: &str,
+    collateral_vault: &str,
+    yes_mint: &str,
+    no_mint: &str,
+    bump: i16,
 ) -> Result<i64> {
     let row = sqlx::query(
         r#"
@@ -30,9 +35,14 @@ pub async fn create_market(
             yes_option,
             no_option,
             end_timestamp,
-            created_slot
+            created_slot,
+            collateral_mint,
+            collateral_vault,
+            yes_mint,
+            no_mint,
+            bump
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         RETURNING id
         "#,
     )
@@ -47,6 +57,11 @@ pub async fn create_market(
     .bind(no_option)
     .bind(end_timestamp)
     .bind(created_slot)
+    .bind(collateral_mint)
+    .bind(collateral_vault)
+    .bind(yes_mint)
+    .bind(no_mint)
+    .bind(bump)
     .fetch_one(pool)
     .await?;
 
@@ -57,22 +72,27 @@ pub async fn get_market_by_address(pool: &PgPool, address: &str) -> Result<Optio
     let row = sqlx::query_as::<_, MarketRow>(
         r#"
         SELECT
-            id,
-            market_id,
-            market_address,
-            creator_address,
-            program_id,
-            title,
-            description,
-            category,
-            yes_option,
-            no_option,
-            end_timestamp,
-            created_slot,
-            resolved,
-            resolved_outcome,
-            created_at,
-            updated_at
+        id,
+           market_id,
+           market_address,
+           creator_address,
+           program_id,
+           title,
+           description,
+           category,
+           yes_option,
+           no_option,
+           end_timestamp,
+           created_slot,
+           collateral_mint,
+           collateral_vault,
+           yes_mint,
+           no_mint,
+           bump,
+           resolved,
+           resolved_outcome,
+           created_at,
+           updated_at
         FROM markets
         WHERE market_address = $1
         LIMIT 1
@@ -100,18 +120,18 @@ pub async fn get_market_by_id(pool: &PgPool, id: i64) -> Result<Option<Market>> 
     Ok(row.map(|r| r.into()))
 }
 
-pub async fn get_next_market_by_id(pool: &PgPool) -> Result<u64> {
-    let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(market_id) FROM markets")
-        .fetch_optional(pool)
-        .await?;
+// pub async fn get_next_market_by_id(pool: &PgPool) -> Result<u64> {
+//     let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(market_id) FROM markets")
+//         .fetch_optional(pool)
+//         .await?;
 
-    let next_id = match row {
-        Some((Some(max_id),)) => max_id + 1,
-        _ => 1,
-    };
+//     let next_id = match row {
+//         Some((Some(max_id),)) => max_id + 1,
+//         _ => 1,
+//     };
 
-    Ok(next_id as u64)
-}
+//     Ok(next_id as u64)
+// }
 
 pub async fn list_markets(pool: &PgPool, limit: i64, offset: i64) -> Result<Vec<Market>> {
     let rows = sqlx::query_as::<_, MarketRow>(

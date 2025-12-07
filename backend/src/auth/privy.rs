@@ -6,8 +6,6 @@ use privy_rs::{
     AuthorizationContext, PrivateKey, PrivyClient,
 };
 
-const PRIVY_ISSUER: &str = "privy.io";
-
 pub struct PClient {
     pub client: PrivyClient,
 }
@@ -40,6 +38,6 @@ impl PClient {
             .sign_message(wallet_address, message, &ctx, None)
             .await?;
 
-        Ok((res))
+        Ok(res)
     }
 }

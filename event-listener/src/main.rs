@@ -22,13 +22,14 @@ pub struct MarketInitialized {
     pub yes_mint: Pubkey,
     pub no_mint: Pubkey,
     pub expiration_timestamp: i64,
+    pub bump: u8,
 }
 
 #[derive(Debug, AnchorDeserialize)]
 pub struct MarketSettled {
     pub market: Pubkey,
     pub market_id: u64,
-    pub outcome: u8, // 0 => yes, 1 => no, 2 = Undecided
+    pub outcome: u8,
 }
 
 #[tokio::main]
@@ -39,7 +40,7 @@ async fn main() -> Result<()> {
     let pool = init_pool(&database_url).await?;
 
     // subscribe
-    let ws_client = PubsubClient::new("ws://localhost:8900").await?;
+    let ws_client = PubsubClient::new("wss://api.devnet.solana.com/").await?;
 
     let config = RpcTransactionLogsConfig { commitment: None };
     let program_id =
@@ -57,6 +58,7 @@ async fn main() -> Result<()> {
         for log in msg.value.logs {
             println!("{:?}", log);
             if let Some(stripped) = log.strip_prefix("Program data: ") {
+                #[allow(deprecated)]
                 if let Ok(data) = base64::decode(stripped) {
                     println!("{:?}", data);
                     if data.starts_with(&initialized_discriminator) {
@@ -71,6 +73,11 @@ async fn main() -> Result<()> {
                                 let title = event.metadata.clone();
                                 let yes_option = "YES".to_string();
                                 let no_option = "NO".to_string();
+                                let collateral_mint = event.collateral_mint.to_string();
+                                let collateral_vault = event.collateral_vault.to_string();
+                                let yes_mint = event.yes_mint.to_string();
+                                let no_mint = event.no_mint.to_string();
+                                let bump = event.bump as i16;
 
                                 match create_market(
                                     &pool,
@@ -85,6 +92,11 @@ async fn main() -> Result<()> {
                                     &no_option,
                                     event.expiration_timestamp,
                                     event.market_id as i64,
+                                    &collateral_mint,
+                                    &collateral_vault,
+                                    &yes_mint,
+                                    &no_mint,
+                                    bump,
                                 )
                                 .await
                                 {

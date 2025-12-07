@@ -1,5 +1,5 @@
 {
-  "address": "2FoSgViaZXUXL8txXYxc893cUSpPCuvdVZBJ9YDzUKzE",
+  "address": "6reqwjR1am9E9ZgekF94JPeXM3Jo2RHN5K9RRC2yyuxz",
   "metadata": {
     "name": "predix_program",
     "version": "0.1.0",
@@ -541,26 +541,6 @@
       "code": 6014,
       "name": "InvalidExpirationTimestamp",
       "msg": "Invalid expiration timestamp"
-    },
-    {
-      "code": 6015,
-      "name": "InvalidCollateralAccount",
-      "msg": "Invalid collateral account"
-    },
-    {
-      "code": 6016,
-      "name": "InvalidOwner",
-      "msg": "Invalid owner"
-    },
-    {
-      "code": 6017,
-      "name": "InvalidAccounts",
-      "msg": "Invalid accounts"
-    },
-    {
-      "code": 6018,
-      "name": "InvalidDelegate",
-      "msg": "Invalid delegate"
     }
   ],
   "types": [

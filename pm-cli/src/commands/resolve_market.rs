@@ -5,6 +5,8 @@ use anchor_client::solana_sdk::{
 use anyhow::Result;
 use std::rc::Rc;
 
+use crate::types::{MarketOutcome, accounts, args};
+
 pub async fn resolve_market(
     program: anchor_client::Program<Rc<Keypair>>,
     payer_keypair: Keypair,
@@ -14,9 +16,9 @@ pub async fn resolve_market(
     println!("Resolving market with ID: {}", market_id);
 
     let market_outcome = match outcome.to_lowercase().as_str() {
-        "yes" => predix_program::state::market::MarketOutcome::Yes,
-        "no" => predix_program::state::market::MarketOutcome::No,
-        "undecided" => predix_program::state::market::MarketOutcome::Undecided,
+        "yes" => MarketOutcome::Yes,
+        "no" => MarketOutcome::No,
+        "undecided" => MarketOutcome::Undecided,
         _ => {
             return Err(anyhow::anyhow!(
                 "Invalid outcome. Must be 'yes', 'no', or 'undecided'"
@@ -34,11 +36,11 @@ pub async fn resolve_market(
 
     let set_winner_tx = program
         .request()
-        .accounts(predix_program::accounts::SetWinner {
+        .accounts(accounts::SetWinner {
             market: market_pda,
             admin: payer_keypair.pubkey(),
         })
-        .args(predix_program::instruction::SetWinner {
+        .args(args::SetWinner {
             outcome: market_outcome,
             result: true,
         })
