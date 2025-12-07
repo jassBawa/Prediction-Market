@@ -1,10 +1,11 @@
 use anchor_client::solana_sdk::signature::Keypair;
 use anchor_lang::{AccountDeserialize, Discriminator};
 use anyhow::Result;
-use predix_program::state::Market;
 
 use serde_json::json;
 use std::rc::Rc;
+
+use crate::types::predix_program::accounts::Market;
 
 pub async fn list_markets(program: anchor_client::Program<Rc<Keypair>>) -> Result<()> {
     println!("Fetching markets from blockchain....\n");

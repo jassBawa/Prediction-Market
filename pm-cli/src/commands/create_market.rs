@@ -8,6 +8,8 @@ use anchor_spl::associated_token::get_associated_token_address;
 use anyhow::Result;
 use std::rc::Rc;
 
+use crate::types::{accounts, args};
+
 pub async fn create_market(
     program: anchor_client::Program<Rc<Keypair>>,
     payer_keypair: Keypair,
@@ -15,13 +17,9 @@ pub async fn create_market(
     metadata: String,
     end_time: i64,
 ) -> Result<()> {
-    println!("Creating market with ID: {}", market_id);
-
     let collateral_mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
         .parse::<Pubkey>()
         .expect("Invalid USDC Mint");
-
-    println!("Using USDC as collateral mint: {}", collateral_mint);
 
     let (market_pda, _market_bump) = Pubkey::find_program_address(
         &[b"market", &market_id.to_le_bytes()],
@@ -48,7 +46,7 @@ pub async fn create_market(
 
     let initialize_tx = program
         .request()
-        .accounts(predix_program::accounts::InitializeMarket {
+        .accounts(accounts::InitializeMarket {
             market: market_pda,
             vault: vault_pda,
             collateral_mint,
@@ -59,7 +57,7 @@ pub async fn create_market(
             token_program: anchor_spl::token::ID,
             associated_token_program: anchor_spl::associated_token::ID,
         })
-        .args(predix_program::instruction::InitializeMarket {
+        .args(args::InitializeMarket {
             market_id,
             metadata: metadata.clone(),
             expiration_timestamp: end_time,
