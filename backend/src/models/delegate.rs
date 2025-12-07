@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct ApproveRequest {
     pub market_id: String,
+    pub market_address: String,
     pub mint: String,
     pub user_ata: String,
     pub program_id: String,

@@ -4,6 +4,8 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{message::Message, signature::Keypair, signer::Signer, transaction::Transaction};
 use std::{str::FromStr, sync::Arc};
 
+use crate::solana::types::{accounts, args};
+
 use crate::solana::{
     accounts::get_ata_address,
     client::SolanaClient,
@@ -23,6 +25,7 @@ pub async fn generate_merge_transaction(
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
     let market = fetch_market(&rpc, &market_pubkey)?;
+    // On-chain Market has market_id as u64, can use directly
     let market_id = market.market_id;
 
     // Get fee payer
@@ -59,7 +62,7 @@ pub async fn generate_merge_transaction(
 
     let instruction = program
         .request()
-        .accounts(predix_program::accounts::MergeToken {
+        .accounts(accounts::MergeTokens {
             user: user_pubkey,
             market: market_pubkey,
             collateral_vault,
@@ -71,7 +74,7 @@ pub async fn generate_merge_transaction(
             system_program: solana_sdk::system_program::ID,
             token_program: spl_token::ID,
         })
-        .args(predix_program::instruction::MergeTokens { market_id, amount })
+        .args(args::MergeTokens { market_id, amount })
         .instructions()?
         .pop()
         .ok_or_else(|| anyhow::anyhow!("Failed to build instruction"))?;

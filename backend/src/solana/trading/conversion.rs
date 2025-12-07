@@ -1,37 +1,35 @@
 use crate::solana::{
     accounts::get_ata_address,
-    types::{share_type_to_trade_side, AccountMeta, MatchFill},
+    types::{MatchFill, TradeSide},
     utils::decimal_to_lamports,
 };
-use matching_engine::{ShareType, Trade};
+use anchor_lang::prelude::AccountMeta;
+use matching_engine::Trade;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 pub fn convert_trades_to_match_fills(
     trades: &[Trade],
-    share_type: ShareType,
+    share_type: TradeSide,
 ) -> Result<Vec<MatchFill>, Box<dyn std::error::Error>> {
     let mut match_fills = Vec::new();
 
-    for (i, trade) in trades.iter().enumerate() {
+    for trade in trades.iter() {
         let shares = decimal_to_lamports(trade.quantity)?;
-        let total_collateral = trade.quantity * trade.price;
-        let price = decimal_to_lamports(total_collateral)?;
+        let price = decimal_to_lamports(trade.price)?; // Price per share, not total
 
         println!(
-            "  → Fill[{}]: shares={}, price={}, side={:?}",
-            i, shares, price, share_type
-        );
-        println!(
-            "     buyer={}, seller={}",
-            &trade.buyer_id[..8],
-            &trade.seller_id[..8]
+            "  Fill: {} shares at {} (buyer: ...{}, seller: ...{})",
+            trade.quantity,
+            trade.price,
+            &trade.buyer_id[trade.buyer_id.len() - 8..],
+            &trade.seller_id[trade.seller_id.len() - 8..]
         );
 
         match_fills.push(MatchFill {
             shares,
             price,
-            side: share_type_to_trade_side(share_type),
+            side: share_type,
         });
     }
 
@@ -40,29 +38,74 @@ pub fn convert_trades_to_match_fills(
 
 pub fn build_remaining_accounts(
     trades: &[Trade],
-    collateral_mint: &str,
-    share_mint: &str,
-) -> Result<Vec<AccountMeta>, Box<dyn std::error::Error>> {
+    share_type: TradeSide,
+    market_id: u64,
+    program_id: &Pubkey,
+    collateral_mint: Pubkey,
+) -> Vec<AccountMeta> {
+    use crate::solana::market::derive_share_mints;
+
     let mut accounts = Vec::new();
-    let collateral_mint_pubkey = Pubkey::from_str(collateral_mint)?;
-    let share_mint_pubkey = Pubkey::from_str(share_mint)?;
+
+    let (yes_mint, no_mint) = derive_share_mints(program_id, market_id);
+
+    let share_mint = match share_type {
+        TradeSide::Yes => yes_mint,
+        TradeSide::No => no_mint,
+    };
 
     for trade in trades {
-        let buyer = Pubkey::from_str(&trade.buyer_id)?;
-        let seller = Pubkey::from_str(&trade.seller_id)?;
+        let buyer = Pubkey::from_str(&trade.buyer_id).expect("Invalid buyer address");
+        let seller = Pubkey::from_str(&trade.seller_id).expect("Invalid seller address");
 
-        let buyer_collateral = get_ata_address(&buyer, &collateral_mint_pubkey);
-        let seller_collateral = get_ata_address(&seller, &collateral_mint_pubkey);
-        let buyer_share = get_ata_address(&buyer, &share_mint_pubkey);
-        let seller_share = get_ata_address(&seller, &share_mint_pubkey);
+        if buyer == seller {
+            panic!("Cannot execute trade: buyer and seller are the same wallet. Self-trading is not allowed.");
+        }
 
-        accounts.push(AccountMeta::new(buyer_collateral.to_string()));
-        accounts.push(AccountMeta::new(seller_collateral.to_string()));
-        accounts.push(AccountMeta::new(buyer_share.to_string()));
-        accounts.push(AccountMeta::new(seller_share.to_string()));
-        accounts.push(AccountMeta::new_readonly(buyer.to_string()));
-        accounts.push(AccountMeta::new_readonly(seller.to_string()));
+        let buyer_collateral = get_ata_address(&buyer, &collateral_mint);
+        let seller_collateral = get_ata_address(&seller, &collateral_mint);
+        let buyer_share = get_ata_address(&buyer, &share_mint);
+        let seller_share = get_ata_address(&seller, &share_mint);
+
+        if buyer_collateral == seller_collateral {
+            panic!("Internal error: buyer and seller have the same collateral ATA");
+        }
+
+        if buyer_share == seller_share {
+            panic!("Internal error: buyer and seller have the same share ATA");
+        }
+
+        accounts.push(AccountMeta {
+            pubkey: buyer_collateral,
+            is_signer: false,
+            is_writable: true,
+        });
+        accounts.push(AccountMeta {
+            pubkey: seller_collateral,
+            is_signer: false,
+            is_writable: true,
+        });
+        accounts.push(AccountMeta {
+            pubkey: buyer_share,
+            is_signer: false,
+            is_writable: true,
+        });
+        accounts.push(AccountMeta {
+            pubkey: seller_share,
+            is_signer: false,
+            is_writable: true,
+        });
+        accounts.push(AccountMeta {
+            pubkey: buyer,
+            is_signer: false,
+            is_writable: false,
+        });
+        accounts.push(AccountMeta {
+            pubkey: seller,
+            is_signer: false,
+            is_writable: false,
+        });
     }
 
-    Ok(accounts)
+    accounts
 }

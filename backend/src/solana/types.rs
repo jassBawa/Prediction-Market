@@ -1,33 +1,17 @@
-// use borsh::{BorshDeserialize, BorshSerialize};
-
+use anchor_lang::declare_program;
 use matching_engine::ShareType;
-pub use predix_program::{MatchFill, TradeSide};
 
-#[derive(Debug, Clone)]
-pub struct AccountMeta {
-    pub pubkey: String,
-    pub is_writable: bool,
-    pub is_signer: bool,
-}
+// Declare the program once here - this generates the predix_program module
+declare_program!(predix_program);
 
-impl AccountMeta {
-    pub fn new(pubkey: String) -> Self {
-        Self {
-            pubkey,
-            is_writable: true,
-            is_signer: false,
-        }
-    }
+// Re-export commonly used types
+pub use predix_program::{
+    accounts::Market,
+    client::{accounts, args},
+    types::{MatchFill, TradeSide},
+};
 
-    pub fn new_readonly(pubkey: String) -> Self {
-        Self {
-            pubkey,
-            is_writable: false,
-            is_signer: false,
-        }
-    }
-}
-
+// Conversion function from matching-engine ShareType to on-chain TradeSide
 pub fn share_type_to_trade_side(share_type: ShareType) -> TradeSide {
     match share_type {
         ShareType::Yes => TradeSide::Yes,

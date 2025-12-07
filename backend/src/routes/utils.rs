@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use db::get_market_by_address;
+// use db::get_market_by_address;
 use matching_engine::{run_market_engine, EngineMsg};
 use rust_decimal::Decimal;
 use solana_sdk::pubkey::Pubkey;
@@ -30,7 +30,7 @@ pub fn parse_pubkey(value: &str, field_name: &str) -> Result<Pubkey, (StatusCode
 pub async fn get_or_create_market_engine(
     state: &Shared,
     market_id: &str,
-    market_address: &str,
+    _market_address: &str,
 ) -> Result<mpsc::Sender<EngineMsg>, (StatusCode, String)> {
     let markets = state.markets.read().await;
 
@@ -40,10 +40,17 @@ pub async fn get_or_create_market_engine(
 
     drop(markets);
 
-    let _market = get_market_by_address(&state.db, market_address)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".into()))?
-        .ok_or((StatusCode::NOT_FOUND, "market not found".into()))?;
+    // TODO: find good approach for this (dont' remove)
+    // let _market = get_market_by_address(&state.db, market_address)
+    //     .await
+    //     .map_err(|e| {
+    //         eprintln!("Database error fetching market: {}", e);
+    //         (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e))
+    //     })?
+    //     .ok_or_else(|| {
+    //         eprintln!("Market not found: {}", market_address);
+    //         (StatusCode::NOT_FOUND, "Market not found".to_string())
+    //     })?;
 
     let mut markets = state.markets.write().await;
 

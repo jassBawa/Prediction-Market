@@ -19,11 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let solana_client = SolanaClient::new(
         std::env::var("SOLANA_RPC_URL")
             .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string()),
-        "6reqwjR1am9E9ZgekF94JPeXM3Jo2RHN5K9RRC2yyuxz".to_string(),
-        std::env::var("SOLANA_KEYPAIR_PATH").unwrap_or_else(|_| {
-            "../solana-prediction-market-program/target/deploy/predix_program-keypair.json"
-                .to_string()
-        }),
+        std::env::var("SOLANA_PROGRAM_ID")
+            .unwrap_or_else(|_| "CTgMcGaeZ63eC9d4v6kEubQ1J3vKLLp2i4E5kFB1ShQm".to_string()),
+        std::env::var("SOLANA_KEYPAIR_PATH").expect(
+            "SOLANA_KEYPAIR_PATH environment variable must be set to your admin wallet keypair path \
+             (e.g., /home/user/.config/solana/id.json). DO NOT use the program keypair!"
+        ),
     );
 
     let app_state = state::AppState {

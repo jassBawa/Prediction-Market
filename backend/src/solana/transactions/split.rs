@@ -3,7 +3,10 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     message::Message, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+
 use std::str::FromStr;
+
+use crate::solana::types::{accounts, args};
 
 use crate::solana::{
     accounts::get_ata_address,
@@ -24,7 +27,7 @@ pub async fn generate_split_transaction(
     let user_pubkey = Pubkey::from_str(user_wallet)?;
 
     let market = fetch_market(&rpc, &market_pubkey)?;
-
+    // On-chain Market has market_id as u64, can use directly
     let market_id = market.market_id;
 
     // Get fee payer
@@ -59,23 +62,26 @@ pub async fn generate_split_transaction(
 
     let program = provider.program(program_pubkey)?;
 
+    let accounts = accounts::SplitToken {
+        market: market_pubkey,
+        user_collateral,
+        collateral_vault,
+        yes_mint,
+        no_mint,
+        yes_ata,
+        no_ata,
+        user: user_pubkey,
+        token_program: spl_token::ID,
+        system_program: solana_sdk::system_program::ID,
+        associated_token_program: anchor_spl::associated_token::ID,
+        admin: fee_payer_pubkey,
+    };
+
+    let args = args::SplitToken { market_id, amount };
     let instruction = program
         .request()
-        .accounts(predix_program::accounts::SplitToken {
-            market: market_pubkey,
-            collateral_vault,
-            yes_mint,
-            no_mint,
-            yes_ata,
-            no_ata,
-            user_collateral,
-            token_program: spl_token::ID,
-            system_program: solana_sdk::system_program::ID,
-            associated_token_program: anchor_spl::associated_token::ID,
-            rent: solana_sdk::sysvar::rent::ID,
-            user: user_pubkey,
-        })
-        .args(predix_program::instruction::SplitToken { market_id, amount })
+        .accounts(accounts)
+        .args(args)
         .instructions()?
         .pop()
         .ok_or_else(|| anyhow::anyhow!("Failed to build instruction"))?;

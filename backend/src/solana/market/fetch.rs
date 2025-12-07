@@ -1,5 +1,5 @@
+use crate::solana::types::Market;
 use anchor_lang::AnchorDeserialize;
-use predix_program::state::Market;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 
